@@ -1,0 +1,38 @@
+{
+    "name": "node-red-contrib-adddelflow",
+    "version": "0.0.1",
+    "description": "adds/deletes flows",
+    "main": "delflow.js",
+    "repository": {
+        "type": "git",
+        "url": "git+https://"
+    },
+    "keywords": [
+        "flow",
+        "node-red",
+        "node"
+    ],
+    "node-red": {
+        "nodes": {
+            "delflow": "delflow.js"
+        }
+    },
+    "author": {
+        "name": "Simon Hailes"
+    },
+    "license": "MIT",
+    "bugs": {
+        "url": "https://"
+    },
+    "homepage": "https://",
+    "dependencies": {
+        
+    },
+    "private": true,
+    "maintainers": [
+        {
+            "name": "btsimonh",
+            "email": "btsimonh@googlemail.com"
+        }
+    ]
+}

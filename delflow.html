@@ -1,0 +1,70 @@
+<script type="text/javascript">
+    RED.nodes.registerType('delflow',{
+        category: "flows",
+        icon: "alert.png",
+        color: "#FFAAAA",
+        inputs: 1,
+        outputs: 1,
+        defaults: {
+            name: { value: "" },
+            enabled: { value: false }
+        },
+        label: function() {
+            return this.name || "delflow"
+        }
+    });
+</script>
+
+<script type="text/x-red" data-template-name="delflow">
+    <div class="form-row">
+        <label for="node-input-name"><i class="icon-tag"></i> Name</label>
+        <input type="text" id="node-input-name" placeholder="Name">
+	</div>
+    <div class="form-row">
+        <input type="checkbox" id="node-input-enabled" style="display: inline-block; width: auto; vertical-align: top;">
+        <label for="node-input-enabled" style="width: 70%;"> Enabled</label>
+	</div>
+</script>
+
+<script type="text/x-red" data-help-name="delflow">
+   <p><b>Deletes a flow</b></p>
+   <p>If <code>msg.flowId</code> is set, then that flowId will be deleted</p>
+   <p>If <code>msg.flowId</code> is not set, <b>the current flow is deleted</b></p>
+   <p>Delete is suppressed unless <b>Enabled</b> is set</p>
+</script>
+
+
+
+<script type="text/javascript">
+    RED.nodes.registerType('addflow',{
+        category: "flows",
+        icon: "inject.png",
+        color: "#C7E9C0",
+        inputs: 1,
+        outputs: 1,
+        defaults: {
+            name: { value: "" }
+        },
+        label: function() {
+            return this.name || "addflow"
+        }
+    });
+</script>
+
+<script type="text/x-red" data-template-name="addflow">
+    <div class="form-row">
+        <label for="node-input-name"><i class="icon-tag"></i> Name</label>
+        <input type="text" id="node-input-name" placeholder="Name">
+	</div>
+</script>
+
+<script type="text/x-red" data-help-name="addflow">
+   <p><b>Adds a new flow</b></p>
+   <p>Input <code>msg.payload</code> which may be either:<br/>
+   1. a json string e.g. <code>{"label":"myflow", "id":"34456:321", "nodes": [ some nodes ] }</code><br/>
+   2. a javascript structure representing the same.</p>
+   <p>id is optional, but if present, it must match the .z in the nodes.</p>
+   <p>Creates a new id for all nodes in the flow, reconnects all wires with the new ids</p>
+   <p>Passes on the input msg with the new flowId in <code>msg.flowId</code> or an error in <code>msg.err</code></p>
+</script>
+
