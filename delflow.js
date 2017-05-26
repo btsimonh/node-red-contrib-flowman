@@ -1,7 +1,9 @@
-var util = require('util');
-var RED2 = require('node-red');
 
 module.exports = function (RED) {
+    var fs = require("fs-extra");
+    var fspath = require("path");
+    var util = require('util');
+    var RED2 = require('node-red');
 
     // delete the current flow, or if msg.flowId, that flow
     function delflow(n) {
@@ -43,7 +45,7 @@ module.exports = function (RED) {
                     outputmsg = true;
                 }
             } else {
-                node.error("delete flow " + id + " inhibited");
+                node.warn("delete flow " + id + " inhibited");
                 msg.err = "delete flow " + id + " inhibited";
             }
 
@@ -65,8 +67,8 @@ module.exports = function (RED) {
         this.name = n.name;
         var node = this;
         node.on('input', function (msg) {
-            var flow = {}
-            if (typeof msg.payload == 'string'){
+            var flow = {};
+            if (typeof msg.payload === 'string'){
                 flow = JSON.parse(msg.payload);
             } else {
                 flow = msg.payload;
@@ -78,7 +80,7 @@ module.exports = function (RED) {
                 return msg;
             }
 
-            if (typeof flow.label != 'string'){
+            if (typeof flow.label !== 'string'){
                 node.error("did not addFlow - no .label found");
                 msg.err = "did not addFlow - no .label found";
                 return msg;
@@ -86,12 +88,12 @@ module.exports = function (RED) {
 
             
             try {
-                node.error("call modify");
+                //node.error("call modify");
                 
                 modifyflow(node, flow, msg);
-                node.error("done modify");
+                //node.error("done modify");
                 //msg.payload = flow;
-                node.error("call addFlow");
+                //node.error("call addFlow");
                 var newflowidpromise = RED2.nodes.addFlow(flow);
 
                 newflowidpromise.then( function(newflowid){
@@ -126,14 +128,14 @@ module.exports = function (RED) {
             // now for each wire.
             var orgnodeid = nodes[a].id;
             nodes[a].id = RED2.util.generateId();
-            node.error("nodeid " + orgnodeid +"->"+nodes[a].id);
+            //node.error("nodeid " + orgnodeid +"->"+nodes[a].id);
 
             if (ins){
                 // rewire ins and outs of subflow
                 for (var i = 0; i < ins.length; i++){
                     for (var w = 0; w < ins[i].wires.length; w++){
                         if (ins[i].wires[w].id === orgnodeid){
-                            node.error("ins " + ins[i].wires[w].id +"->"+nodes[a].id);
+                            //node.error("ins " + ins[i].wires[w].id +"->"+nodes[a].id);
                             ins[i].wires[w].id = nodes[a].id; 
                         }
                     }
@@ -144,7 +146,7 @@ module.exports = function (RED) {
                 for (var o = 0; o < outs.length; o++){
                     for (var w = 0; w < outs[o].wires.length; w++){
                         if (outs[o].wires[w].id === orgnodeid){
-                            node.error("outs " + outs[o].wires[w].id +"->"+nodes[a].id);
+                            //node.error("outs " + outs[o].wires[w].id +"->"+nodes[a].id);
                             outs[o].wires[w].id = nodes[a].id; 
                         }
                     }
@@ -174,6 +176,7 @@ module.exports = function (RED) {
                 var keys = Object.keys(nodes[b]);
                 keys.forEach(function(key){
                    if (nodes[b][key] === orgnodeid){
+                       //console.log("found ref to " + orgnodeid + " in node " + nodes[b].id + " key " + key + " changed to " + nodes[a].id);
                        nodes[b][key] = nodes[a].id;
                    } 
                 });
@@ -189,14 +192,14 @@ module.exports = function (RED) {
         if (!newz) 
             newz = z;
         var l = nodes.length;
-        node.error("flatten - newz " + newz);
+        //node.error("flatten - newz " + newz);
         
         for (var a = 0; a < l; a++){
             // if node in this flow/subflow
             if (nodes[a].z === z){
                 if (nodes[a].type.startsWith("subflow:")){
                     var subflowid = nodes[a].type.slice(8);
-                    node.error("flatten found subflow " + nodes[a].name);
+                    //node.error("flatten found subflow " + nodes[a].name);
                     var subflow = null;
                     var subflowindex = null;
                     
@@ -205,7 +208,7 @@ module.exports = function (RED) {
                         if (nodes[b].id === subflowid){
                             subflow = nodes[b];
                             subflowindex = b;
-                            node.error("subflow is of " + subflow.name);
+                            //node.error("subflow is of " + subflow.name);
                             break;
                         }
                     }
@@ -218,30 +221,30 @@ module.exports = function (RED) {
                             // duplicate
                             //var util = require('util');
                             var n = nodes[b];
-                            node.error("node:" + util.inspect(n));
+                            //node.error("node:" + util.inspect(n));
                             var nnode = clone(n);
                             nnode.z = newz;
                             subnodes.push(nnode);
-                            node.error("subflow contains " + nnode.name + " type " + nnode.type );
-                            node.error("node:" + util.inspect(nnode));
+                            //node.error("subflow contains " + nnode.name + " type " + nnode.type );
+                            //node.error("node:" + util.inspect(nnode));
                         }
                     }
                     
-                    node.error("ins:" + util.inspect(subflow.in, {depth:6}));
+                    //node.error("ins:" + util.inspect(subflow.in, {depth:6}));
                     var ins = clone(subflow.in);
-                    node.error("ins:" + util.inspect(ins, {depth:6}));
-                    node.error("outs:" + util.inspect(subflow.out, {depth:6}));
+                    //node.error("ins:" + util.inspect(ins, {depth:6}));
+                    //node.error("outs:" + util.inspect(subflow.out, {depth:6}));
                     var outs = clone(subflow.out);
-                    node.error("outs:" + util.inspect(outs, {depth:6}));
+                    //node.error("outs:" + util.inspect(outs, {depth:6}));
                     
                     // now give them unique ids, reconnect internal wires, and connect
                     // external wires
                     newids(node, subnodes, ins, outs);
                     
-                    node.error("ins:" + util.inspect(ins, {depth:6}));
-                    node.error("outs:" + util.inspect(outs, {depth:6}));
+                    //node.error("ins:" + util.inspect(ins, {depth:6}));
+                    //node.error("outs:" + util.inspect(outs, {depth:6}));
 
-                    node.error("new subnodes:" + util.inspect(subnodes));
+                    //node.error("new subnodes:" + util.inspect(subnodes));
 
 
                     // retain the subnodeinstance
@@ -328,11 +331,11 @@ module.exports = function (RED) {
                             var src = outs[out1].wires[outw].id;
                             var srcport = outs[out1].wires[outw].port;
                             
-                            node.error("outs "+out1+" wire "+outw+" dest "+dest+" src "+ src+":"+srcport);
+                            //node.error("outs "+out1+" wire "+outw+" dest "+dest+" src "+ src+":"+srcport);
                             
                             // if out connected to in, then do so.
                             if (src === newsubflowid){
-                                node.error("is subflow itself");
+                                //node.error("is subflow itself");
                                 src = inputnode.id;
                                 srcport = 0;
                             }
@@ -343,7 +346,7 @@ module.exports = function (RED) {
                                     while (!nodes[srcnode].wires[srcport]){
                                         nodes[srcnode].wires.push([]);
                                     }
-                                    node.error("found src at node "+srcnode);
+                                    //node.error("found src at node "+srcnode);
                                     nodes[srcnode].wires[srcport].push(dest);
                                 }
                             }
@@ -366,12 +369,12 @@ module.exports = function (RED) {
                     
                     // zap the one we found, so we don't find it again
                     
-                    node.error("flatten kill subflow");
+                    //node.error("flatten kill subflow");
                     //nodes[a].z = "xxx";
                     //nodes[a].type = "xxx";
                     
                     foundone = true;
-                    node.error("done subflow");
+                    //node.error("done subflow");
                     
                     // must start again, as we've updated the nodes.
                     // will call back in from the start
@@ -381,7 +384,7 @@ module.exports = function (RED) {
         }
         
         if (!foundone){
-            node.error("no more subflows found");
+            //node.error("no more subflows found");
         }
         return foundone;
     }
@@ -390,28 +393,28 @@ module.exports = function (RED) {
     // for each id we come accross, correctly 
     // re-linking wiring
     function modifyflow( node, f, msg ){
-        node.error("in modify");
+        //node.error("in modify");
         if (!f.id){
             //find the first z which is NOT an id
             var l = f.nodes.length;
             for (var a = 0; a < l; a++){
                 //if non-empty z
-                node.error("check " + f.nodes[a].z + " " + f.nodes[a].name);
+                //node.error("check " + f.nodes[a].z + " " + f.nodes[a].name);
                 if (f.nodes[a].z && (f.nodes[a].z !== "")){
                     var found = false;
                     var z = f.nodes[a].z;
                     for (var b = 0; b < l; b++){
                         if (z === f.nodes[b].id){
-                            node.error("found at " + f.nodes[b].id + " " + f.nodes[b].name);
+                            //node.error("found at " + f.nodes[b].id + " " + f.nodes[b].name);
                             found = true;
                             break;
                         }
                     }
                     if (!found){
-                        node.error("z not an id");
+                        //node.error("z not an id");
                         f.id = z;
-                        node.error("z not an id");
-                        node.error("found flow id at node " + a + " " + f.nodes[a].name);
+                        //node.error("z not an id");
+                        //node.error("found flow id at node " + a + " " + f.nodes[a].name);
                         break;
                     }
                 }
@@ -419,7 +422,7 @@ module.exports = function (RED) {
         }
         
         if (f.id){
-            node.error("modify");
+            //node.error("modify");
 
             var flowid = f.id;
             f.id = RED2.util.generateId();
@@ -443,7 +446,7 @@ module.exports = function (RED) {
             // for each subflow, flatten it.
             // call until we find no more; each iteration 
             // flattens one level
-            node.error("call flatten");
+            //node.error("call flatten");
             var done = false;
             do {
                 done = flattensubflows(node, f, f.id);
@@ -469,9 +472,196 @@ module.exports = function (RED) {
             msg.payload = msg.payload + JSON.stringify(f);
             
         } else {
-            node.error("modify - no id found?");
+            node.error("modify - no flow id found?");
         }
 
+    };
+    
+    // save the current flow, or if msg.flowId, that flow, or 'all'
+    function saveflow(n) {
+        RED.nodes.createNode(this, n);
+        this.name = n.name || '';
+        this.path = n.path || '';
+        this.enabled = n.enabled || false;
+        var node = this;
+        
+        // call input in 100ms
+        if (this.enabled){
+            setTimeout( function() { node.emit("input",{}); }, 100 );
+        }
+        
+        node.on('input', function (msg) {
+            
+            var pname = '';
+            var pext = '.flow';
+            var ppath = node.path;
+            var errs = [];
+            
+            if (node.path.length < 1){
+                err = 'no path set';
+                errs.push(err);
+                node.error("no path set" + err.toString(),msg); 
+                msg.errs = errs;
+                node.send(msg);
+                return;
+            } else {
+                var endc = node.path.slice(-1);
+                if ((endc !== '/') && (endc !== '\\')){
+                    var parsed = fspath.parse(node.path);
+                    pname = parsed.name;
+                    pext = parsed.ext;
+                    ppath = parsed.dir;
+                    if (pext === ''){
+                        pext = '.flow';
+                    }
+                }
+            }
+
+            var ids = [this.z];
+            if (msg.flowId) { 
+                ids = msg.flowId; 
+            }
+            
+            var doall = false;
+            
+            if (ids === 'all'){
+                ids = [];
+                doall = true;
+                // read all flow ids from whole of node-red
+                var allnodes = RED2.nodes.getFlows().flows;
+                for (var n = 0; n < allnodes.length; n++){
+                    if (allnodes[n].type === 'tab'){
+                        ids.push(allnodes[n].id);
+                    }
+                }
+                
+                // if we thought we had an exact name, but have multiple
+                // flows, then reset and add a slash
+                if (pname){
+                    pname = '';
+                    ppath = node.path + '/';
+                }
+                
+            } else {
+                if (!util.isArray(ids)){
+                    ids = [ids];
+                }
+            }
+            
+            for (var i = 0; i < ids.length; i++){
+                var id = ids[i];
+                
+                try {
+                    var flow = RED2.nodes.getFlow(id);
+
+                    var name = flow.label;
+                    
+                    // if name is to be overridden
+                    if (pname !== ''){
+                        name = pname;
+                    }
+                    var ext = pext;
+                    var path = ppath;
+                    
+                    var filename = fspath.join(path, name + ext);
+                    var filespath = fspath.join(path, name);
+                    var nodes = flow.nodes;        
+                    var json = JSON.stringify(nodes, '', '\t');
+                    
+                    var writenodes = function(path, nodes){
+                        var l = nodes.length;
+                        for (var a = 0; a < l; a++){
+                            var n = nodes[a];
+                            if (n.type === 'function'){
+                                var name = n.name;
+                                if (name === ''){
+                                    name = n.id;
+                                }
+                                var filename2 = fspath.join(path, name + '.js');
+                    
+                                try {
+                                    fs.writeFileSync(filename2, n.func, {encoding:"utf8"});
+                                } catch (err) {
+                                    if (err.code === "ENOENT") {
+                                        try{
+                                            fs.ensureFileSync(filename2);
+                                            fs.writeFileSync(filename2, n.func, {encoding:"utf8"});
+                                        } catch (e) {
+                                            errs.push(err.toString());
+                                            node.error("writefail flow " + err.toString(),msg); 
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    };
+                    
+                    
+                    try{
+                        fs.writeFileSync(filename, json, {encoding:"utf8"});
+                        writenodes(filespath, nodes);
+                    } catch (err){
+                        if (err) {
+                            if (err.code === "ENOENT") {
+                                try {
+                                    fs.ensureFileSync(filename);
+                                    fs.writeFileSync(filename, json, {encoding:"utf8"});
+                                    writenodes(filespath, nodes);
+                                } catch (err){
+                                    if (err) { 
+                                        errs.push(err.toString());
+                                        node.error("createfail function " + err.toString(),msg); 
+                                    }
+                                }
+                            } else { 
+                                errs.push(err.toString());
+                                node.error("writefail function " + err.toString(),msg); 
+                            }
+                        }
+                    }
+                    
+                } catch (err) {
+                    node.error(err.message);
+                    // if we did not delete, always pass on input msg
+                    // with err set
+                    errs.push(err.toString());
+                }
+            }
+
+            if (errs.length){
+                msg.errs = errs;
+            }
+            // if we still exist, and want to pass the msg on...
+            node.send(msg);
+        });
     }
+    RED.nodes.registerType("saveflow", saveflow);
+    
+
+    // save the current flow, or if msg.flowId, that flow, or 'all'
+    function getflows(n) {
+        RED.nodes.createNode(this, n);
+        this.name = n.name || '';
+        var node = this;
+        
+        node.on('input', function (msg) {
+            var flows = [];
+            
+            // read all flow ids from whole of node-red
+            var allnodes = RED2.nodes.getFlows().flows;
+            for (var n = 0; n < allnodes.length; n++){
+                if (allnodes[n].type === 'tab'){
+                    // duplicate so we don't give ability to modify
+                    var flow = {id:allnodes[n].id, label:allnodes[n].label};
+                    flows.push(flow);
+                }
+            }
+            
+            msg.payload = flows;
+            node.send(msg);
+        });
+    }
+    RED.nodes.registerType("getflows", getflows);
+
     
 };

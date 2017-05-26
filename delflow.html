@@ -68,3 +68,88 @@
    <p>Passes on the input msg with the new flowId in <code>msg.flowId</code> or an error in <code>msg.err</code></p>
 </script>
 
+
+
+<script type="text/javascript">
+    RED.nodes.registerType('saveflow',{
+        category: "flows",
+        icon: "file.png",
+        align: "right",
+        color: "#AAAAFF",
+        inputs: 1,
+        outputs: 1,
+        defaults: {
+            name: { value: "" },
+            path: { value: "" },
+            enabled: { value: false }
+        },
+        label: function() {
+            return this.name || "saveflow"
+        }
+    });
+</script>
+
+<script type="text/x-red" data-template-name="saveflow">
+    <div class="form-row">
+        <label for="node-input-name"><i class="icon-tag"></i> Name</label>
+        <input type="text" id="node-input-name" placeholder="Name">
+	</div>
+    <div class="form-row">
+        <label for="node-input-path"><i class="icon-tag"></i> File Path</label>
+        <input type="text" id="node-input-path" placeholder="Full path">
+	</div>
+    <div class="form-row">
+        <input type="checkbox" id="node-input-enabled" style="display: inline-block; width: auto; vertical-align: top;">
+        <label for="node-input-enabled" style="width: 70%;"> Operate on Deploy/Load</label>
+	</div>
+</script>
+
+<script type="text/x-red" data-help-name="saveflow">
+   <p><b>Saves a flow</b></p>
+   <p>Saves one or all flows to separate files, extracting content of function nodes to .js files in a sub directory</p>
+   <p><b>File Path</b> is the path to save the file(s) to.  If set to a specific filename, then this will be the filename of the flow for single flow saving, the sub-folder for functions being this name without extension.  If no extension is given, then .flow will be assumed.  If the path has a trailing slash, then the flow(s) will be saved within this folder, with the flow label as the flow filename with .flow extension, and functions saved in a sub-folder of the flow label. </p>
+   <p><b>Note: flows with the same label WILL overwrite each other.  Function nodes with the same name in the same flow WILL overwrite each other.</b> Function nodes without a name will be saved as thier id (which may change).  Paths to files will be created.  File writing is synchonous; for large flows this will block the nodejs main loop.  Does not descend into subflows.</p>
+   <p></p>
+   <br/>
+   <p>For operation from input message:</p>
+   <p>If <code>msg.flowId</code> is not set, <b>the current flow is saved</b></p>
+   <p>If <code>msg.flowId</code> is set to 'all', <b>ALL flows are saved</b></p>
+   <p>If <code>msg.flowId</code> is set to a flow id, then flowId will be saved</p>
+   <p>For automatic operation on Deploy or Load/Start, check <b>Operate on Deploy/Load</b>.  This will automatically save the current flow <b>when this node is started</b></p>
+   <p>Errors creating/writing will be notified in debug, and added to an array passed out as <code>msg.errs</code></p>
+   <p>Output: same msg as input, unless errors occurred, in which case <code>msg.errs</code> will also be set.  (for automatic operation, msg = {} at 'input').</p>
+   
+</script>
+
+
+<script type="text/javascript">
+    RED.nodes.registerType('getflows',{
+        category: "flows",
+        icon: "file.png",
+        align: "right",
+        color: "#AAEEAA",
+        inputs: 1,
+        outputs: 1,
+        defaults: {
+            name: { value: "" },
+        },
+        label: function() {
+            return this.name || "getflows"
+        }
+    });
+</script>
+
+<script type="text/x-red" data-template-name="getflows">
+    <div class="form-row">
+        <label for="node-input-name"><i class="icon-tag"></i> Name</label>
+        <input type="text" id="node-input-name" placeholder="Name">
+	</div>
+</script>
+
+<script type="text/x-red" data-help-name="getflows">
+   <p><b>Gets the current flows</b></p>
+   <p>input: any msg</p>
+   <p>Output: msg.payload is set to an array of flows.  This can be used to obtain flow labels and ids, for example to save or delete a specific flow.</p>
+   <p>each flow is <code>{id:&lt;flow id&gt;, label:&lt;flow name&gt;}</code></p>
+   
+</script>
