@@ -1,7 +1,7 @@
 {
     "name": "node-red-contrib-adddelflow",
-    "version": "0.0.1",
-    "description": "adds/deletes flows",
+    "version": "0.0.2",
+    "description": "manipulates flows in node-red",
     "main": "delflow.js",
     "repository": {
         "type": "git",
