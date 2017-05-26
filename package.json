@@ -2,7 +2,7 @@
     "name": "node-red-contrib-flows",
     "version": "0.0.2",
     "description": "manipulates flows in node-red",
-    "main": "delflow.js",
+    "main": "flows.js",
     "repository": {
         "type": "git",
         "url": "git+https://"
@@ -14,7 +14,7 @@
     ],
     "node-red": {
         "nodes": {
-            "delflow": "delflow.js"
+            "flows": "flows.js"
         }
     },
     "author": {
