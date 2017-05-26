@@ -1,5 +1,5 @@
 {
-    "name": "node-red-contrib-flows",
+    "name": "node-red-contrib-flowman",
     "version": "0.0.2",
     "description": "manipulates flows in node-red",
     "main": "flows.js",
@@ -22,9 +22,9 @@
     },
     "license": "MIT",
     "bugs": {
-        "url": "https://github.com/btsimonh/node-red-contrib-flows"
+        "url": "https://github.com/btsimonh/node-red-contrib-flowman"
     },
-    "homepage": "https://github.com/btsimonh/node-red-contrib-flows",
+    "homepage": "https://github.com/btsimonh/node-red-contrib-flowman",
     "dependencies": {
         
     },
