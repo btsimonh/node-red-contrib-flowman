@@ -22,13 +22,12 @@
     },
     "license": "MIT",
     "bugs": {
-        "url": "https://"
+        "url": "https://github.com/btsimonh/node-red-contrib-flows"
     },
-    "homepage": "https://",
+    "homepage": "https://github.com/btsimonh/node-red-contrib-flows",
     "dependencies": {
         
     },
-    "private": true,
     "maintainers": [
         {
             "name": "btsimonh",
