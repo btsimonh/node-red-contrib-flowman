@@ -1,4 +1,4 @@
-# node-red-contrib-adddelflow
+# node-red-contrib-flowman
 Node-red nodes for manipulating flows using the RED nodejs API
 
 ##Functions
