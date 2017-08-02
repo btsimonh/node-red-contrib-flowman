@@ -31,6 +31,7 @@
    <p>If <code>msg.flowId</code> is set, then that flowId will be deleted</p>
    <p>If <code>msg.flowId</code> is not set, <b>the current flow is deleted</b></p>
    <p>Delete is suppressed unless <b>Enabled</b> is set</p>
+   <p>Passes on the input msg with any error notified in <code>msg.err</code> - <b>note - output is suppressed if delflow deleted itself!</b></p>
 </script>
 
 
@@ -63,11 +64,12 @@
    <p>Input <code>msg.payload</code> which may be either:<br/>
    1. a json string e.g. <code>{"label":"myflow", "id":"34456:321", "nodes": [ some nodes ] }</code><br/>
    2. a javascript structure representing the same.</p>
-   <p>id is optional, but if present, it must match the .z in the nodes.</p>
+   <p>id is optional, but if present, it must match the .z in the primary nodes.</p>
    <p>Creates a new id for all nodes in the flow, reconnects all wires with the new ids</p>
-   <p>Passes on the input msg with the new flowId in <code>msg.flowId</code> or an error in <code>msg.err</code></p>
+   <p>If Config nodes are present, they will be tagged as IN the new flow (i.e. not global)</p>
+   <p>If SubFlows are present, they will be 'squashed', and all the associated nodes will appear in the new flow, with some created nodes for subflow input and outputs. <i>The positioning of subflow nodes is not pretty...</i></p>
+   <p>Passes on the input msg with the new flowId in <code>msg.flowId</code> added, or an error in <code>msg.err</code></p>
 </script>
-
 
 
 <script type="text/javascript">
@@ -81,7 +83,8 @@
         defaults: {
             name: { value: "" },
             path: { value: "" },
-            enabled: { value: false }
+            enabled: { value: false },
+            exporttype: { value: "original" }
         },
         label: function() {
             return this.name || "saveflow"
@@ -102,6 +105,15 @@
         <input type="checkbox" id="node-input-enabled" style="display: inline-block; width: auto; vertical-align: top;">
         <label for="node-input-enabled" style="width: 70%;"> Operate on Deploy/Load</label>
 	</div>
+    <div class="form-row">
+        <label for="node-input-exporttype" style="width: 70%;"> Export style</label>
+        <select type="text" id="node-input-exporttype" style="display: inline-block; width: 250px; vertical-align: top;">
+            <option value="original" >Nodes Only</option>
+            <option value="addflow" >As AddFlow uses as input</option>
+            <option value="clipboardexport" >As exported to clipboard</option>
+        </select>
+	</div>
+    
 </script>
 
 <script type="text/x-red" data-help-name="saveflow">
@@ -116,8 +128,12 @@
    <p>If <code>msg.flowId</code> is set to 'all', <b>ALL flows are saved</b></p>
    <p>If <code>msg.flowId</code> is set to a flow id, then flowId will be saved</p>
    <p>For automatic operation on Deploy or Load/Start, check <b>Operate on Deploy/Load</b>.  This will automatically save the current flow <b>when this node is started</b></p>
+   <p>Select the <b>Export style</b> from the dropdown:<br/>
+   <b>Nodes Only</b> will only include nodes actual in the flow as a flat array <code>[ &lt;the nodes&gt; ]</code> - e.g. for source control use.<br/>
+   <b>As AddFlow uses as input</b> will include subflows and Config nodes and output in the form required for AddFlow to add the flow <code>{id:&lt;id&gt;, label:&lt;label&gt;, nodes:[ &lt;the nodes&gt; ]}</code><br/>
+   <b>As exported to clipboard</b> will include subflows and Config nodes and output in a form similar to the clipboard export from the browser - a flat array <code>[ &lt;the nodes&gt; ]</code>.</p>
    <p>Errors creating/writing will be notified in debug, and added to an array passed out as <code>msg.errs</code></p>
-   <p>Output: same msg as input, unless errors occurred, in which case <code>msg.errs</code> will also be set.  (for automatic operation, msg = {} at 'input').</p>
+   <p>Output: same msg as input, unless errors occurred, in which case <code>msg.errs</code> will also be set to an array of error strings.  (for automatic operation, msg = {} at 'input').</p>
    
 </script>
 
@@ -147,9 +163,12 @@
 </script>
 
 <script type="text/x-red" data-help-name="getflows">
-   <p><b>Gets the current flows</b></p>
-   <p>input: any msg</p>
-   <p>Output: msg.payload is set to an array of flows.  This can be used to obtain flow labels and ids, for example to save or delete a specific flow.</p>
-   <p>each flow is <code>{id:&lt;flow id&gt;, label:&lt;flow name&gt;}</code></p>
-   
+   <p><b>Gets the current flows <i>or</i> a specfic flow</b></p>
+   <p>input: <code>msg.id</code> present or absent</p>
+   <p>Output: <br>
+   The input <code>msg</code> is passed to output with either <code>msg.payload</code> and <code>msg.err</code> added/changed<br/>
+   if <code>msg.id</code> is set to a flow id, <code>msg.payload</code> is output as an object representing the requested flow like <code>{id:&lt;id&gt;, label:&lt;label&gt;, nodes:[ &lt;the nodes&gt; ]}</code><br>
+   if <code>msg.id</code> is <b>undefined</b>, <code>msg.payload</code> is output as an array of flows like <code>[{id:&lt;flow id&gt;, label:&lt;flow name&gt;}, ...]</code>.  This can be used to obtain flow labels and ids, for example to get/save/delete a specific flow.</p>
+   <p>Errors will be notified in <code>msg.err</code>, with <code>msg.payload = undefined</code></p>
+
 </script>

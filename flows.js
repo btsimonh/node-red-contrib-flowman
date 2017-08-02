@@ -5,6 +5,8 @@ module.exports = function (RED) {
     var util = require('util');
     var RED2 = require('node-red');
 
+    console.log("loading flowman");
+    
     // delete the current flow, or if msg.flowId, that flow
     function delflow(n) {
         RED.nodes.createNode(this, n);
@@ -57,6 +59,7 @@ module.exports = function (RED) {
     }
     RED.nodes.registerType("delflow", delflow);
 
+    console.log("registered delflow");
     
     
     // add a flow from msg.payload.
@@ -114,6 +117,7 @@ module.exports = function (RED) {
         });
     }
     RED.nodes.registerType("addflow", addflow);
+    console.log("registered addflow");
 
     
     function clone(a){
@@ -483,6 +487,7 @@ module.exports = function (RED) {
         this.name = n.name || '';
         this.path = n.path || '';
         this.enabled = n.enabled || false;
+        this.exporttype = n.exporttype || 'original';
         var node = this;
         
         // call input in 100ms
@@ -523,12 +528,12 @@ module.exports = function (RED) {
             }
             
             var doall = false;
+            var allnodes = RED2.nodes.getFlows().flows;
             
             if (ids === 'all'){
                 ids = [];
                 doall = true;
                 // read all flow ids from whole of node-red
-                var allnodes = RED2.nodes.getFlows().flows;
                 for (var n = 0; n < allnodes.length; n++){
                     if (allnodes[n].type === 'tab'){
                         ids.push(allnodes[n].id);
@@ -547,14 +552,16 @@ module.exports = function (RED) {
                     ids = [ids];
                 }
             }
+
             
             for (var i = 0; i < ids.length; i++){
                 var id = ids[i];
                 
                 try {
-                    var flow = RED2.nodes.getFlow(id);
+                    var flowcomplete = getflow(id, node.exporttype);
 
-                    var name = flow.label;
+                    var nodes = flowcomplete.nodes;
+                    var name = flowcomplete.label;
                     
                     // if name is to be overridden
                     if (pname !== ''){
@@ -565,8 +572,18 @@ module.exports = function (RED) {
                     
                     var filename = fspath.join(path, name + ext);
                     var filespath = fspath.join(path, name);
-                    var nodes = flow.nodes;        
-                    var json = JSON.stringify(nodes, '', '\t');
+
+                    switch (exporttype){
+                        case 'addflow':
+                            var json = JSON.stringify(flowcomplete, '', '\t');
+                            break;
+                        case 'clipboardexport':
+                        case 'original':
+                        default:
+                            var json = JSON.stringify(flowcomplete.nodes, '', '\t');
+                            break;
+                    }
+                    
                     
                     var writenodes = function(path, nodes){
                         var l = nodes.length;
@@ -636,6 +653,133 @@ module.exports = function (RED) {
         });
     }
     RED.nodes.registerType("saveflow", saveflow);
+    console.log("registered saveflow");
+
+
+    
+    /////////////////////////////////////////////////
+    // function gets a complete flow in the form {id:<id>, label:<label>, nodes:[ the nodes ]}
+    // if exporttype is not 'original', then subflows and config nodes are included.
+    // used by getflows node, and by saveflows node.
+    function getflow(id, exporttype){
+        exporttype = exporttype || 'addflow';
+        var flow = RED2.nodes.getFlow(id);
+
+        // copy the nodes array, as we may well want to add to it.
+        var nodes = [];
+        
+        var nodes_map = {};
+        // also note any subflows in use
+        var subflow_map = {};
+        var l = flow.nodes.length;
+        for (var a = 0; a < l; a++){
+            nodes_map[flow.nodes[a].id] = flow.nodes[a];
+            if (undefined !== flow.nodes[a].subflow){
+                subflow_map[flow.nodes[a].subflow] = 1;
+            }
+        }
+        
+        if (exporttype !== 'original')
+            var globalnodes = RED2.nodes.getFlow('global');
+
+        
+        // add in subflows that we are using
+        if ((exporttype !== 'original') && globalnodes.subflows){
+            for (var c = 0; c < globalnodes.subflows.length; c++){
+                var gsubflow = globalnodes.subflows[c];
+                if (subflow_map[gsubflow.id] !== undefined){
+                    // we've got a subflow which is in use.
+
+                    // push parts of the subflow
+                    var copied = clone(gsubflow);
+                    delete copied.nodes;
+                    delete copied.configs;
+                    // don't add a subflow twice (I dont think the code above will give us it twice)
+                    if (undefined === nodes_map[copied.id]){
+                        nodes.push(copied);
+                        nodes_map[copied.id] = copied;
+
+                        // push all it's nodes as as they are
+                        for (var n = 0; n < gsubflow.nodes.length; n++){
+                            nodes.push(clone(gsubflow.nodes[n]));
+                            // add a note of the id in the nodes_map
+                            // so we can identify configs in use next
+                            nodes_map[gsubflow.nodes[n].id] = gsubflow.nodes[n];
+                        }
+                        
+                        // push all it's configs as as they are?
+                        // - not for the moent - they should be picked up when we go through the global configs
+                        //for (var n = 0; n < gsubflow.configs.length; n++){
+                        //    nodes.push(gsubflow.configs[n]);
+                        //}
+                    }
+                }
+            }
+        }
+        
+
+        // locate and push our tab node
+        // sometimes clipboard shows this, normally not?
+        if (0){
+            if (exporttype){
+                for (var n = 0; n < allnodes.length; n++){
+                    //if (allnodes[n].type === 'tab')
+                     //   console.log(util.inspect(allnodes[n]));
+                    if (allnodes[n].id === id){
+                        nodes.push(clone(allnodes[n]));
+                        nodes_map[allnodes[n].id] = allnodes[n];
+                        // there should only be one
+                        break;
+                    }
+                }
+            }
+        }
+        
+        
+        // push everything in our flow
+        // (hopefully, we get the same order as a gui export)
+        var l = flow.nodes.length;
+        for (var a = 0; a < l; a++){
+            flownode = clone(flow.nodes[a]);
+            if (flownode.subflow){
+                delete flownode.subflow;
+            }
+            nodes.push(flownode);
+            nodes_map[flownode.id] = flownode;
+        }
+
+
+        // add in config nodes which reference any of our nodes in _users
+        if ((exporttype !== 'original') && globalnodes.configs){
+            for (var c = 0; c < globalnodes.configs.length; c++){
+                var gnode = globalnodes.configs[c];
+                if (gnode._users !== undefined){
+                    for (var u = 0; u < gnode._users.length; u++){
+                        if (undefined !== nodes_map[gnode._users[u]]){
+                            //console.log("config used by " + gnode._users[u] + " = " + util.inspect(nodes_map[gnode._users[u]]));
+                            // want to remove _users, and put it IN our flow
+                            var copied = clone(gnode);
+                            delete copied._users;
+                            //copied.z = id;
+                            // don't add a config node twice
+                            if (undefined === nodes_map[copied.id]){
+                                nodes.push(copied);
+                                nodes_map[copied.id] = copied;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        var exportflow = { 
+            id: id,
+            label: flow.label,
+            nodes: nodes
+        };
+        return exportflow;
+    }
+
     
 
     // save the current flow, or if msg.flowId, that flow, or 'all'
@@ -647,21 +791,36 @@ module.exports = function (RED) {
         node.on('input', function (msg) {
             var flows = [];
             
-            // read all flow ids from whole of node-red
-            var allnodes = RED2.nodes.getFlows().flows;
-            for (var n = 0; n < allnodes.length; n++){
-                if (allnodes[n].type === 'tab'){
-                    // duplicate so we don't give ability to modify
-                    var flow = {id:allnodes[n].id, label:allnodes[n].label};
-                    flows.push(flow);
+            if (msg.id !== undefined){
+                try{
+                    msg.payload = getflow(msg.id);
+                } catch (e) {
+                    delete msg.payload;
+                    msg.err = 'could not get flow ' + util.inspect(msg.id) + ' ' + util.inspect(e);
+                }
+            } else {
+                try{
+                    // read all flow ids from whole of node-red
+                    var allnodes = RED2.nodes.getFlows().flows;
+                    for (var n = 0; n < allnodes.length; n++){
+                        if (allnodes[n].type === 'tab'){
+                            // duplicate so we don't give ability to modify
+                            var flow = {id:allnodes[n].id, label:allnodes[n].label};
+                            flows.push(flow);
+                        }
+                    }
+                    
+                    msg.payload = flows;
+                } catch (e) {
+                    delete msg.payload;
+                    msg.err = 'could not get flows ' + util.inspect(e);
                 }
             }
-            
-            msg.payload = flows;
             node.send(msg);
         });
     }
     RED.nodes.registerType("getflows", getflows);
+    console.log("registered getflows");
 
     
 };
