@@ -5,7 +5,7 @@ module.exports = function (RED) {
     var util = require('util');
     var RED2 = require('node-red');
 
-    console.log("loading flowman");
+    //console.log("loading flowman");
     
     // delete the current flow, or if msg.flowId, that flow
     function delflow(n) {
@@ -59,7 +59,7 @@ module.exports = function (RED) {
     }
     RED.nodes.registerType("delflow", delflow);
 
-    console.log("registered delflow");
+    //console.log("registered delflow");
     
     
     // add a flow from msg.payload.
@@ -117,7 +117,7 @@ module.exports = function (RED) {
         });
     }
     RED.nodes.registerType("addflow", addflow);
-    console.log("registered addflow");
+    //console.log("registered addflow");
 
     
     function clone(a){
@@ -653,7 +653,7 @@ module.exports = function (RED) {
         });
     }
     RED.nodes.registerType("saveflow", saveflow);
-    console.log("registered saveflow");
+    //console.log("registered saveflow");
 
 
     
@@ -820,7 +820,7 @@ module.exports = function (RED) {
         });
     }
     RED.nodes.registerType("getflows", getflows);
-    console.log("registered getflows");
+    //console.log("registered getflows");
 
     
 };

@@ -11,6 +11,8 @@ Note: 0.16.2 with it's new 'difference' detection does not play nice with addflo
 Note: as this uses private apis in RED, there's no guarantee of continued correct operation as NR get's enhanced.
 
 Updates:
+0.0.5:
+removed some console.log()
 0.0.4:
 saveflow: Added Export style dropdown option on saveflow, to allow the output to contain config/subflows, and to allow matching of addflow style or 'export from browser' style files.
 getflows: added ability to get a complete flow by setting msg.id, returning an object suitable for use with addflow.

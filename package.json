@@ -1,6 +1,6 @@
 {
     "name": "node-red-contrib-flowman",
-    "version": "0.0.4",
+    "version": "0.0.5",
     "description": "manipulates flows in node-red",
     "main": "flows.js",
     "repository": {
