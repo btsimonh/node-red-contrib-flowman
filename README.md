@@ -11,6 +11,8 @@ Note: 0.16.2 with it's new 'difference' detection does not play nice with addflo
 Note: as this uses private apis in RED, there's no guarantee of continued correct operation as NR get's enhanced.
 
 Updates:
+0.0.6:
+fixed a bug in saveflow ('exporttype undefined')
 0.0.5:
 removed some console.log()
 0.0.4:

@@ -573,7 +573,7 @@ module.exports = function (RED) {
                     var filename = fspath.join(path, name + ext);
                     var filespath = fspath.join(path, name);
 
-                    switch (exporttype){
+                    switch (node.exporttype){
                         case 'addflow':
                             var json = JSON.stringify(flowcomplete, '', '\t');
                             break;
