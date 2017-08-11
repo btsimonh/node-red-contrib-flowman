@@ -772,6 +772,30 @@ module.exports = function (RED) {
             }
         }
         
+        // add in any in-flow configs
+        if (flow.configs){
+            for (var c = 0; c < flow.configs.length; c++){
+                var gnode = flow.configs[c];
+                // don;t even check; it's in our flow.
+                //if (gnode._users !== undefined){
+                //    for (var u = 0; u < gnode._users.length; u++){
+                //        if (undefined !== nodes_map[gnode._users[u]]){
+                            //console.log("config used by " + gnode._users[u] + " = " + util.inspect(nodes_map[gnode._users[u]]));
+                            // want to remove _users, and put it IN our flow
+                            var copied = clone(gnode);
+                            delete copied._users;
+                            //copied.z = id;
+                            // don't add a config node twice
+                            if (undefined === nodes_map[copied.id]){
+                                nodes.push(copied);
+                                nodes_map[copied.id] = copied;
+                            }
+                //        }
+                //    }
+                //}
+            }
+        }
+        
         var exportflow = { 
             id: id,
             label: flow.label,
