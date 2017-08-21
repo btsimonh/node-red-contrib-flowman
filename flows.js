@@ -1,9 +1,11 @@
 
 module.exports = function (RED) {
-    var fs = require("fs-extra");
+    var fs = require.main.require("fs-extra");
     var fspath = require("path");
     var util = require('util');
-    var RED2 = require('node-red');
+    var RED2 = require.main.require('node-red');
+    
+    //console.log("RED is " + util.inspect(RED2));
 
     //console.log("loading flowman");
     
