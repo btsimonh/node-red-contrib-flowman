@@ -62,7 +62,16 @@ module.exports = function (RED) {
                                 p.cmd(p);
                             }
                             s.node.send(s.msg);
-                        } ).catch(function(reason){console.log(reason);});
+                        } ).catch(function(reason){
+                                // remove the item we were trying to process.
+                                // maybe someone tried to delete the SAME flow twice...
+                                var p = RED.nodes.config_flowman_flow_queue[0];
+                                // abort the whole queue, as we failed all future promises as well.
+                                RED.nodes.config_flowman_flow_queue = [];
+                                node.error("failed to delete flow " + p.id + " " + util.inspect(reason));
+                                p.msg.err = reason;
+                                p.node.send(p.msg);
+                            });
                 }
                 
                 // if we already have a global addflow queue, then add to it.
@@ -162,7 +171,16 @@ module.exports = function (RED) {
                             p.cmd(p);
                         }
                         node.send(s.msg);
-                    }).catch(function(reason){console.log(reason);});
+                    }).catch(function(reason){
+                        // remove the item we were trying to process.
+                        // maybe someone tried to delete the SAME flow twice...
+                        var p = RED.nodes.config_flowman_flow_queue[0];
+                        // abort the whole queue, as we failed all future promises as well.
+                        RED.nodes.config_flowman_flow_queue = [];
+                        node.error("failed to add flow " + p.flow.label + " " + util.inspect(reason));
+                        p.msg.err = reason;
+                        p.node.send(p.msg);
+                    });
                 }
                 
                 // if we already have a global addflow queue, then add to it.
