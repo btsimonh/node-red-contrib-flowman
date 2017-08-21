@@ -26,7 +26,7 @@ module.exports = function (RED) {
             if (id !== this.z){
                 outputmsg = true;
             }
-            
+           
             if (this.enabled){
                 // a global queue of flows to be added
                 // since each is done asynchrously, we must serialise.
@@ -60,7 +60,7 @@ module.exports = function (RED) {
                                 var p = RED.nodes.config_flowman_flow_queue[0];
                                 // do the relevant command
                                 p.cmd(p);
-                        }
+                            }
                             s.node.send(s.msg);
                         } ).catch(function(reason){console.log(reason);});
                 }
@@ -80,7 +80,7 @@ module.exports = function (RED) {
                         if (RED.nodes.config_flowman_flow_queue.length === 1){
                             var p = RED.nodes.config_flowman_flow_queue[0];
                             p.cmd(p);
-                }
+                        }
                 //    }, 1);
                     
             } else {
@@ -131,23 +131,61 @@ module.exports = function (RED) {
                 //node.error("done modify");
                 //msg.payload = flow;
                 //node.error("call addFlow");
-                var newflowidpromise = RED2.nodes.addFlow(flow);
 
-                newflowidpromise.then( function(newflowid){
-                    msg.flowId = newflowid;
-                    node.send(msg);
-                }).catch(function(){
-                    node.error("did not addFlow?");
-                    msg.err = "did not addFlow?";
-                    node.send(msg);
-                });
+                // a global queue of flows to be added
+                // since each is done asynchroously, we must serialise.
+                RED.nodes.config_flowman_flow_queue = RED.nodes.config_flowman_flow_queue || [];
+
+
+                var process_add = function( s ){
+                    var newflowidpromise = RED2.nodes.addFlow(s.flow);//, 'nodes');
+                    newflowidpromise.then( function(newflowid){
+                        // remove us because we are done
+                        RED.nodes.config_flowman_flow_queue = RED.nodes.config_flowman_flow_queue.slice(1);
+                        s.msg.flowId = newflowid;
+                        // any more adds to do?
+                        if (RED.nodes.config_flowman_flow_queue.length){
+                            var p = RED.nodes.config_flowman_flow_queue[0];
+                            // do the relevant command
+                            p.cmd(p);
+                        }
+                        s.node.send(s.msg);
+                    }, function(){
+                        // remove us because we are failed
+                        RED.nodes.config_flowman_flow_queue = RED.nodes.config_flowman_flow_queue.slice(1);
+                        node.error("did not addFlow?");
+                        s.msg.err = "did not addFlow?";
+                        // any more adds to do?
+                        if (RED.nodes.config_flowman_flow_queue.length){
+                            var p = RED.nodes.config_flowman_flow_queue[0];
+                            // do the relevant command
+                            p.cmd(p);
+                        }
+                        node.send(s.msg);
+                    }).catch(function(reason){console.log(reason);});
+                }
+                
+                // if we already have a global addflow queue, then add to it.
+                RED.nodes.config_flowman_flow_queue.push(
+                    { flow: flow, msg:msg, node:node, cmd: process_add }
+                    );
+                    
+
+                // if we just added one to the queue, and there is only one, do it now.
+                // to start the process of adding flows off.
+                // if more flows are added, the function will add them AFTER this one.
+                if (RED.nodes.config_flowman_flow_queue.length === 1){
+                    var p = RED.nodes.config_flowman_flow_queue[0];
+                    p.cmd(p);
+                }
+                
             } catch (err) {
                 node.error(err.message);
                 msg.err = "exception: did not addFlow";
                 node.send(msg);
             }
             
-            // don't return anything, as msgs may be sent from promise.
+            // don't return anything, as msgs may be sent from promises.
         });
     }
     RED.nodes.registerType("addflow", addflow);
@@ -805,7 +843,7 @@ module.exports = function (RED) {
                 }
             }
         }
-        
+
         // add in any in-flow configs
         if (flow.configs){
             for (var c = 0; c < flow.configs.length; c++){
