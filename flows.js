@@ -28,33 +28,65 @@ module.exports = function (RED) {
             }
             
             if (this.enabled){
-                try {
-                    setTimeout(function(){
-                        try {
-                            RED2.nodes.removeFlow(id); 
+                // a global queue of flows to be added
+                // since each is done asynchrously, we must serialise.
+                RED.nodes.config_flowman_flow_queue = RED.nodes.config_flowman_flow_queue || [];
+
+                
+                var process_del = function( s ){
+                    // use the promise returned to emit a msg after delete is complete.
+                    RED2.nodes.removeFlow(id).then(
+                        function(){
                             node.log("deleted flow " + id);
-                        } catch (e) {
+                            RED.nodes.config_flowman_flow_queue = RED.nodes.config_flowman_flow_queue.slice(1);
+                            // any more to do?
+                            if (RED.nodes.config_flowman_flow_queue.length){
+                                var p = RED.nodes.config_flowman_flow_queue[0];
+                                // do the relevant command
+                                p.cmd(p);
+                            }
+                            if (s.outputmsg){
+                                s.node.send(s.msg);
+                            }
+                        }, 
+                        function(){
+                            RED.nodes.config_flowman_flow_queue = RED.nodes.config_flowman_flow_queue.slice(1);
                             node.error("failed to delete flow " + id + " " + util.inspect(e));
                             // if we did not delete, always pass on input msg
                             // with err set
-                            msg.err = e;
-                            outputmsg = true;
+                            s.msg.err = e;
+                            // any more to do?
+                            if (RED.nodes.config_flowman_flow_queue.length){
+                                var p = RED.nodes.config_flowman_flow_queue[0];
+                                // do the relevant command
+                                p.cmd(p);
                         }
-                        }, 1);
-                } catch (err) {
-                    node.error(err.message);
-                    // if we did not delete, always pass on input msg
-                    // with err set
-                    msg.err = err;
-                    outputmsg = true;
+                            s.node.send(s.msg);
+                        } ).catch(function(reason){console.log(reason);});
                 }
+                
+                // if we already have a global addflow queue, then add to it.
+                RED.nodes.config_flowman_flow_queue.push(
+                    { id: id, outputmsg: outputmsg, msg: msg, node: node, cmd: process_del }
+                    );
+
+                    
+                // try to delete, but only next tick.
+                //setTimeout(function(){
+                // can't delay, we may have added one in the meantime
+                        // if we just added one to the queue, and there is only one, do it now.
+                        // to start the process of adding flows off.
+                        // if more flows are added, the function will add them AFTER this one.
+                        if (RED.nodes.config_flowman_flow_queue.length === 1){
+                            var p = RED.nodes.config_flowman_flow_queue[0];
+                            p.cmd(p);
+                }
+                //    }, 1);
+                    
             } else {
+                // if inhibited, always send msg on
                 node.warn("delete flow " + id + " inhibited");
                 msg.err = "delete flow " + id + " inhibited";
-            }
-
-            // if we still exist, and want to pass the msg on...
-            if (outputmsg){
                 node.send(msg);
             }
         });
