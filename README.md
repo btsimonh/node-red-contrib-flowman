@@ -11,6 +11,10 @@ Note: 0.16.2 with it's new 'difference' detection does not play nice with addflo
 Note: as this uses private apis in RED, there's no guarantee of continued correct operation as NR get's enhanced.
 
 Updates:
+0.0.9:
+improve error handling for addflow/delflow; in 0.0.8 it was possible to send two delflows for the same flow, and this would result in NR raising a valid exception of 'flow not present', but this would then terminate the queue processing, which would never again be started.
+Now, when such an exception is raised, the WHOLE queue will be emptied, just so that it's not stuck in a state where it can't be started (it's only started if add/del creates the first entry on the queue).
+This is not ideal - would be better to continue the queue after the exception, or to remove entries from the queue which have the same id as the id just deleted so the error never occurs, or to 'getflows' and just not try to delete if the id is not present.
 0.0.8:
 addflow and delflow are now serialised, so that multiple adds/deletes do not interfere with each other (but still may interfere with a web delpoy).  Both addflow and delfow will now only pass on the msg once the add/del has been completed (async style).
 Note: each add/del WILL cause a save of the flows file.
