@@ -904,6 +904,7 @@ module.exports = function (RED) {
         
         node.on('input', function (msg) {
             var flows = [];
+            msg.thisflow = node.z;
             
             if (msg.id !== undefined){
                 try{
