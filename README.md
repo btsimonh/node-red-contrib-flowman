@@ -11,6 +11,8 @@ Note: 0.16.2 with it's new 'difference' detection does not play nice with addflo
 Note: as this uses private apis in RED, there's no guarantee of continued correct operation as NR get's enhanced.
 
 Updates:
+0.0.10:
+allow msg.filename to specify path or filename for saveflows.
 0.0.9:
 improve error handling for addflow/delflow; in 0.0.8 it was possible to send two delflows for the same flow, and this would result in NR raising a valid exception of 'flow not present', but this would then terminate the queue processing, which would never again be started.
 Now, when such an exception is raised, the WHOLE queue will be emptied, just so that it's not stuck in a state where it can't be started (it's only started if add/del creates the first entry on the queue).

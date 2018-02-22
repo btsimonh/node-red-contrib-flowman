@@ -589,10 +589,16 @@ module.exports = function (RED) {
             
             var pname = '';
             var pext = '.flow';
-            var ppath = node.path;
             var errs = [];
+            var pathin = node.path;
             
-            if (node.path.length < 1){
+            if (msg.filename){
+                pathin = msg.filename;
+            }
+
+            var ppath = pathin;
+            
+            if (pathin.length < 1){
                 err = 'no path set';
                 errs.push(err);
                 node.error("no path set" + err.toString(),msg); 
@@ -600,9 +606,9 @@ module.exports = function (RED) {
                 node.send(msg);
                 return;
             } else {
-                var endc = node.path.slice(-1);
+                var endc = pathin.slice(-1);
                 if ((endc !== '/') && (endc !== '\\')){
-                    var parsed = fspath.parse(node.path);
+                    var parsed = fspath.parse(pathin);
                     pname = parsed.name;
                     pext = parsed.ext;
                     ppath = parsed.dir;
@@ -634,7 +640,7 @@ module.exports = function (RED) {
                 // flows, then reset and add a slash
                 if (pname){
                     pname = '';
-                    ppath = node.path + '/';
+                    ppath = pathin + '/';
                 }
                 
             } else {
