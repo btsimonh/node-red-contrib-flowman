@@ -11,6 +11,8 @@ Note: 0.16.2 with it's new 'difference' detection does not play nice with addflo
 Note: as this uses private apis in RED, there's no guarantee of continued correct operation as NR get's enhanced.
 
 Updates:
+0.0.11:
+add disabled to addFlow and getFlow - needs enabling in NR API.
 0.0.10:
 allow msg.filename to specify path or filename for saveflows.
 0.0.9:

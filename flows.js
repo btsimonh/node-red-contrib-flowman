@@ -895,6 +895,7 @@ module.exports = function (RED) {
         var exportflow = { 
             id: id,
             label: flow.label,
+            disabled: flow.disabled,
             nodes: nodes
         };
         return exportflow;
