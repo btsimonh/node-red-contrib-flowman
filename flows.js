@@ -264,6 +264,7 @@ module.exports = function (RED) {
                     }
                 }
                 
+                
                 // replace in any keys which mention the old id - 
                 // this will hook up configuration nodes
                 // e.g. serial, mqtt, etc.
@@ -273,6 +274,15 @@ module.exports = function (RED) {
                        //console.log("found ref to " + orgnodeid + " in node " + nodes[b].id + " key " + key + " changed to " + nodes[a].id);
                        nodes[b][key] = nodes[a].id;
                    } 
+
+                   // if a node key is an array, search the array for the old id, and replace with the new one.
+                   if (Array.isArray(nodes[b][key])){
+                       for (var idx = 0; idx < nodes[b][key].length; idx++) {
+                          if (nodes[b][key][idx] === orgnodeid) {
+                            nodes[b][key][idx] = nodes[a].id;
+                          }
+                       }
+                   }
                 });
             }
         }
