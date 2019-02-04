@@ -1,0 +1,256 @@
+[
+    {
+        "id": "d155f238.cda83",
+        "type": "debug",
+        "z": "37af7346.3f0b0c",
+        "name": "",
+        "active": true,
+        "console": "false",
+        "complete": "true",
+        "x": 650,
+        "y": 200,
+        "wires": []
+    },
+    {
+        "id": "797095af.ab1b6c",
+        "type": "addflow",
+        "z": "37af7346.3f0b0c",
+        "name": "",
+        "x": 500,
+        "y": 60,
+        "wires": [
+            [
+                "d8fe079.5c256f8",
+                "4cc517a7.24bfc8"
+            ]
+        ]
+    },
+    {
+        "id": "5696e98.67f4a18",
+        "type": "template",
+        "z": "37af7346.3f0b0c",
+        "name": "simpleFlowJson",
+        "field": "payload",
+        "fieldType": "msg",
+        "format": "json",
+        "syntax": "plain",
+        "template": "{\"label\":\"myflow\", \"id\":\"570dd9ad.86ac18\", \"nodes\":[{\"id\":\"4129ba0c.082c84\",\"type\":\"inject\",\"z\":\"570dd9ad.86ac18\",\"name\":\"\",\"topic\":\"\",\"payload\":\"\",\"payloadType\":\"date\",\"repeat\":\"\",\"crontab\":\"\",\"once\":false,\"x\":100,\"y\":120,\"wires\":[[\"cc237afa.f8f718\"]]},{\"id\":\"cc237afa.f8f718\",\"type\":\"function\",\"z\":\"570dd9ad.86ac18\",\"name\":\"simple\",\"func\":\"msg.payload = \\\"hello\\\";\\n\\n\\nreturn msg;\",\"outputs\":1,\"noerr\":0,\"x\":230,\"y\":120,\"wires\":[[\"35e921ba.b06abe\"]]},{\"id\":\"35e921ba.b06abe\",\"type\":\"debug\",\"z\":\"570dd9ad.86ac18\",\"name\":\"\",\"active\":true,\"console\":\"false\",\"complete\":\"false\",\"x\":510,\"y\":120,\"wires\":[]}]\n}",
+        "output": "str",
+        "x": 300,
+        "y": 60,
+        "wires": [
+            [
+                "797095af.ab1b6c",
+                "b344aa8d.29ff18"
+            ]
+        ]
+    },
+    {
+        "id": "34d24c92.6240f4",
+        "type": "inject",
+        "z": "37af7346.3f0b0c",
+        "name": "Add a flow",
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "x": 120,
+        "y": 60,
+        "wires": [
+            [
+                "5696e98.67f4a18"
+            ]
+        ]
+    },
+    {
+        "id": "d8fe079.5c256f8",
+        "type": "function",
+        "z": "37af7346.3f0b0c",
+        "name": "storeid",
+        "func": "if (msg.err){\n    node.error(msg.err);\n    return;\n}\n\nflow.set('lastid', msg.flowId);\nnode.warn(\"added flow id \"+msg.flowId);\n\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "x": 650,
+        "y": 60,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "11780e51.3a0412",
+        "type": "delflow",
+        "z": "37af7346.3f0b0c",
+        "name": "",
+        "enabled": true,
+        "x": 490,
+        "y": 160,
+        "wires": [
+            [
+                "908ab54c.adb678",
+                "b1a606e2.0d0c88"
+            ]
+        ]
+    },
+    {
+        "id": "7eb310c5.0b2e1",
+        "type": "inject",
+        "z": "37af7346.3f0b0c",
+        "name": "delete last added",
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "x": 140,
+        "y": 160,
+        "wires": [
+            [
+                "48269e50.9347a"
+            ]
+        ]
+    },
+    {
+        "id": "48269e50.9347a",
+        "type": "function",
+        "z": "37af7346.3f0b0c",
+        "name": "getlastid",
+        "func": "\nvar id = flow.get('lastid');\n\nif (id) {\n    msg.flowId = id;\n    return msg;\n    \n} else {\n    node.error(\"no last id\");\n}\n\n",
+        "outputs": 1,
+        "noerr": 0,
+        "x": 320,
+        "y": 160,
+        "wires": [
+            [
+                "11780e51.3a0412",
+                "d9934178.8caaf"
+            ]
+        ]
+    },
+    {
+        "id": "908ab54c.adb678",
+        "type": "function",
+        "z": "37af7346.3f0b0c",
+        "name": "removelastid",
+        "func": "if (msg.err) {\n    node.error(msg.err);\n    return;\n}\n\nvar lastid = flow.get('lastid');\n\nif (msg.flowId === lastid) {\n    flow.set('lastid', null);\n    node.warn(\"deleted flow was lastid\");\n}\n\nnode.warn(\"deleted flow \"+msg.flowId);\n\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "x": 670,
+        "y": 160,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "5175880.ccd5878",
+        "type": "inject",
+        "z": "37af7346.3f0b0c",
+        "name": "delete all myflow",
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "x": 140,
+        "y": 240,
+        "wires": [
+            [
+                "3452849f.703dac"
+            ]
+        ]
+    },
+    {
+        "id": "3452849f.703dac",
+        "type": "getflows",
+        "z": "37af7346.3f0b0c",
+        "name": "",
+        "x": 320,
+        "y": 240,
+        "wires": [
+            [
+                "80887f3e.f6789",
+                "157f5560.e9416b"
+            ]
+        ]
+    },
+    {
+        "id": "80887f3e.f6789",
+        "type": "function",
+        "z": "37af7346.3f0b0c",
+        "name": "find 'myflow'",
+        "func": "if (msg.err) {\n    node.error(msg.err);\n    return;\n}\n\nfor (var i = 0; i < msg.payload.length; i++){\n    if (msg.payload[i].label === 'myflow') {\n        var newmsg = {\n            flowId: msg.payload[i].id,\n        };\n        node.send(newmsg);\n    }\n}\n",
+        "outputs": 1,
+        "noerr": 0,
+        "x": 490,
+        "y": 240,
+        "wires": [
+            [
+                "11780e51.3a0412",
+                "d155f238.cda83"
+            ]
+        ]
+    },
+    {
+        "id": "157f5560.e9416b",
+        "type": "debug",
+        "z": "37af7346.3f0b0c",
+        "name": "",
+        "active": true,
+        "console": "false",
+        "complete": "true",
+        "x": 450,
+        "y": 200,
+        "wires": []
+    },
+    {
+        "id": "b1a606e2.0d0c88",
+        "type": "debug",
+        "z": "37af7346.3f0b0c",
+        "name": "",
+        "active": true,
+        "console": "false",
+        "complete": "true",
+        "x": 650,
+        "y": 120,
+        "wires": []
+    },
+    {
+        "id": "d9934178.8caaf",
+        "type": "debug",
+        "z": "37af7346.3f0b0c",
+        "name": "",
+        "active": true,
+        "console": "false",
+        "complete": "true",
+        "x": 450,
+        "y": 120,
+        "wires": []
+    },
+    {
+        "id": "b344aa8d.29ff18",
+        "type": "debug",
+        "z": "37af7346.3f0b0c",
+        "name": "",
+        "active": true,
+        "console": "false",
+        "complete": "true",
+        "x": 490,
+        "y": 20,
+        "wires": []
+    },
+    {
+        "id": "4cc517a7.24bfc8",
+        "type": "debug",
+        "z": "37af7346.3f0b0c",
+        "name": "",
+        "active": true,
+        "console": "false",
+        "complete": "true",
+        "x": 650,
+        "y": 20,
+        "wires": []
+    }
+]
