@@ -5,7 +5,7 @@
     "main": "flows.js",
     "repository": {
         "type": "git",
-        "url": "https://github.com/btsimonh/node-red-contrib-flowman"
+        "url": "git+https://github.com/btsimonh/node-red-contrib-flowman.git"
     },
     "keywords": [
         "flow",
