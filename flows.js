@@ -1,586 +1,545 @@
 
 module.exports = function (RED) {
-    var fs = require.main.require("fs-extra");
+    "use strict";
+    var fs = require("fs");
     var fspath = require("path");
     var util = require('util');
-    var RED2 = require.main.require('node-red');
-    
-    //console.log("RED is " + util.inspect(RED2));
 
-    //console.log("loading flowman");
-    
+    // The flow add/remove/get API is not part of the API given to nodes, so
+    // reach into the node-red module itself (as earlier versions did).
+    // Resolved lazily, so a failure is reported on use rather than at load.
+    var RED2 = null;
+    function runtime() {
+        if (!RED2) {
+            try {
+                RED2 = require.main.require('node-red');
+            } catch (e) {
+                RED2 = require('node-red');
+            }
+        }
+        return RED2;
+    }
+
+    function generateId() {
+        if (RED.util && typeof RED.util.generateId === 'function') {
+            return RED.util.generateId();
+        }
+        return runtime().util.generateId();
+    }
+
+    function clone(a) {
+        return JSON.parse(JSON.stringify(a));
+    }
+
+    // turn whatever was thrown/rejected into a readable string
+    function errText(e) {
+        if (e === undefined || e === null) {
+            return 'unknown error';
+        }
+        if (typeof e === 'string') {
+            return e;
+        }
+        if (e.message) {
+            return e.message;
+        }
+        if (e.code === 404) {
+            return 'flow not found';
+        }
+        return util.inspect(e);
+    }
+
+    // Node-RED >= 1.0 passes send/done to input handlers; make sure we
+    // always have usable versions.
+    function sendFn(node, send) {
+        return send || function () { node.send.apply(node, arguments); };
+    }
+    function doneFn(done) {
+        return done || function () {};
+    }
+
+    /////////////////////////////////////////////////
+    // A single queue of flow add/remove operations, shared by addflow and
+    // delflow. Each operation causes a deploy of the flows, so they must
+    // run one at a time.
+    //
+    // A job is { run: fn -> value|promise, ok: fn(result), fail: fn(err) }.
+    // run() may throw synchronously or return a rejected promise (Node-RED
+    // 1.x throws synchronously for e.g. 'flow not found', later versions
+    // reject). Either way, only that job fails, and the queue always moves on.
+    var queue = [];
+    var busy = false;
+
+    function enqueue(job) {
+        queue.push(job);
+        if (!busy) {
+            runNext();
+        }
+    }
+
+    function runNext() {
+        if (!queue.length) {
+            busy = false;
+            return;
+        }
+        busy = true;
+        var job = queue.shift();
+        Promise.resolve()
+            .then(function () { return job.run(); })
+            .then(
+                function (result) { job.ok(result); },
+                function (err) { job.fail(err); }
+            )
+            .catch(function (err) {
+                // only reached if ok()/fail() themselves threw
+                RED.log.error("flowman: " + errText(err));
+            })
+            .then(runNext);
+    }
+
+    /////////////////////////////////////////////////
     // delete the current flow, or if msg.flowId, that flow
     function delflow(n) {
         RED.nodes.createNode(this, n);
         this.name = n.name;
         this.enabled = n.enabled || false;
         var node = this;
-        node.on('input', function (msg) {
-            var id = this.z;
-            var outputmsg = false;
-            if (msg.flowId) { 
-                id = msg.flowId; 
+        node.on('input', function (msg, send, done) {
+            send = sendFn(node, send);
+            done = doneFn(done);
+
+            var id = node.z;
+            if (msg.flowId) {
+                id = msg.flowId;
             }
-            
+
             // if we are not deleting this flow, then send on the input msg
-            if (id !== this.z){
-                outputmsg = true;
-            }
-           
-            if (this.enabled){
-                // a global queue of flows to be added
-                // since each is done asynchrously, we must serialise.
-                RED.nodes.config_flowman_flow_queue = RED.nodes.config_flowman_flow_queue || [];
+            var outputmsg = (id !== node.z);
 
-                
-                var process_del = function( s ){
-                    // use the promise returned to emit a msg after delete is complete.
-                    RED2.nodes.removeFlow(id).then(
-                        function(){
-                            node.log("deleted flow " + id);
-                            RED.nodes.config_flowman_flow_queue = RED.nodes.config_flowman_flow_queue.slice(1);
-                            // any more to do?
-                            if (RED.nodes.config_flowman_flow_queue.length){
-                                var p = RED.nodes.config_flowman_flow_queue[0];
-                                // do the relevant command
-                                p.cmd(p);
-                            }
-                            if (s.outputmsg){
-                                s.node.send(s.msg);
-                            }
-                        }, 
-                        function(){
-                            RED.nodes.config_flowman_flow_queue = RED.nodes.config_flowman_flow_queue.slice(1);
-                            node.error("failed to delete flow " + id + " " + util.inspect(e));
-                            // if we did not delete, always pass on input msg
-                            // with err set
-                            s.msg.err = e;
-                            // any more to do?
-                            if (RED.nodes.config_flowman_flow_queue.length){
-                                var p = RED.nodes.config_flowman_flow_queue[0];
-                                // do the relevant command
-                                p.cmd(p);
-                            }
-                            s.node.send(s.msg);
-                        } ).catch(function(reason){
-                                // remove the item we were trying to process.
-                                // maybe someone tried to delete the SAME flow twice...
-                                var p = RED.nodes.config_flowman_flow_queue[0];
-                                // abort the whole queue, as we failed all future promises as well.
-                                RED.nodes.config_flowman_flow_queue = [];
-                                node.error("failed to delete flow " + p.id + " " + util.inspect(reason));
-                                p.msg.err = reason;
-                                p.node.send(p.msg);
-                            });
-                }
-                
-                // if we already have a global addflow queue, then add to it.
-                RED.nodes.config_flowman_flow_queue.push(
-                    { id: id, outputmsg: outputmsg, msg: msg, node: node, cmd: process_del }
-                    );
-
-                    
-                // try to delete, but only next tick.
-                //setTimeout(function(){
-                // can't delay, we may have added one in the meantime
-                        // if we just added one to the queue, and there is only one, do it now.
-                        // to start the process of adding flows off.
-                        // if more flows are added, the function will add them AFTER this one.
-                        if (RED.nodes.config_flowman_flow_queue.length === 1){
-                            var p = RED.nodes.config_flowman_flow_queue[0];
-                            p.cmd(p);
-                        }
-                //    }, 1);
-                    
-            } else {
+            if (!node.enabled) {
                 // if inhibited, always send msg on
                 node.warn("delete flow " + id + " inhibited");
                 msg.err = "delete flow " + id + " inhibited";
-                node.send(msg);
+                send(msg);
+                done();
+                return;
             }
+
+            enqueue({
+                run: function () {
+                    return runtime().nodes.removeFlow(id);
+                },
+                ok: function () {
+                    node.log("deleted flow " + id);
+                    if (outputmsg) {
+                        send(msg);
+                    }
+                    done();
+                },
+                fail: function (err) {
+                    // if we did not delete, always pass on input msg
+                    // with err set
+                    msg.err = "failed to delete flow " + id + ": " + errText(err);
+                    node.error(msg.err);
+                    send(msg);
+                    done();
+                }
+            });
         });
     }
     RED.nodes.registerType("delflow", delflow);
 
-    //console.log("registered delflow");
-    
-    
+
+    /////////////////////////////////////////////////
     // add a flow from msg.payload.
-    // a new flowid is created (twice! once here, and once in addFlow())
-    // and all nodes are given new ids with wirng corrected.
+    // all nodes are given new ids, with wiring corrected.
     function addflow(n) {
         RED.nodes.createNode(this, n);
         this.name = n.name;
         var node = this;
-        node.on('input', function (msg) {
-            var flow = {};
-            if (typeof msg.payload === 'string'){
-                flow = JSON.parse(msg.payload);
-            } else {
-                flow = msg.payload;
-            }
-            
-            if (!Array.isArray(flow.nodes)){
-                node.error("did not addFlow - no .nodes found");
-                msg.err = "did not addFlow - no .nodes found";
-                return msg;
+        node.on('input', function (msg, send, done) {
+            send = sendFn(node, send);
+            done = doneFn(done);
+
+            function reject(text) {
+                node.error(text);
+                msg.err = text;
+                send(msg);
+                done();
             }
 
-            if (typeof flow.label !== 'string'){
-                node.error("did not addFlow - no .label found");
-                msg.err = "did not addFlow - no .label found";
-                return msg;
-            }
-
-            
+            var flow;
             try {
-                //node.error("call modify");
-                
-                modifyflow(node, flow, msg);
-                //node.error("done modify");
-                //msg.payload = flow;
-                //node.error("call addFlow");
-
-                // a global queue of flows to be added
-                // since each is done asynchroously, we must serialise.
-                RED.nodes.config_flowman_flow_queue = RED.nodes.config_flowman_flow_queue || [];
-
-
-                var process_add = function( s ){
-                    var newflowidpromise = RED2.nodes.addFlow(s.flow);//, 'nodes');
-                    newflowidpromise.then( function(newflowid){
-                        // remove us because we are done
-                        RED.nodes.config_flowman_flow_queue = RED.nodes.config_flowman_flow_queue.slice(1);
-                        s.msg.flowId = newflowid;
-                        // any more adds to do?
-                        if (RED.nodes.config_flowman_flow_queue.length){
-                            var p = RED.nodes.config_flowman_flow_queue[0];
-                            // do the relevant command
-                            p.cmd(p);
-                        }
-                        s.node.send(s.msg);
-                    }, function(){
-                        // remove us because we are failed
-                        RED.nodes.config_flowman_flow_queue = RED.nodes.config_flowman_flow_queue.slice(1);
-                        node.error("did not addFlow?");
-                        s.msg.err = "did not addFlow?";
-                        // any more adds to do?
-                        if (RED.nodes.config_flowman_flow_queue.length){
-                            var p = RED.nodes.config_flowman_flow_queue[0];
-                            // do the relevant command
-                            p.cmd(p);
-                        }
-                        node.send(s.msg);
-                    }).catch(function(reason){
-                        // remove the item we were trying to process.
-                        // maybe someone tried to delete the SAME flow twice...
-                        var p = RED.nodes.config_flowman_flow_queue[0];
-                        // abort the whole queue, as we failed all future promises as well.
-                        RED.nodes.config_flowman_flow_queue = [];
-                        node.error("failed to add flow " + p.flow.label + " " + util.inspect(reason));
-                        p.msg.err = reason;
-                        p.node.send(p.msg);
-                    });
+                if (typeof msg.payload === 'string') {
+                    flow = JSON.parse(msg.payload);
+                } else {
+                    // work on a copy, so msg.payload is passed on untouched
+                    flow = clone(msg.payload);
                 }
-                
-                // if we already have a global addflow queue, then add to it.
-                RED.nodes.config_flowman_flow_queue.push(
-                    { flow: flow, msg:msg, node:node, cmd: process_add }
-                    );
-                    
-
-                // if we just added one to the queue, and there is only one, do it now.
-                // to start the process of adding flows off.
-                // if more flows are added, the function will add them AFTER this one.
-                if (RED.nodes.config_flowman_flow_queue.length === 1){
-                    var p = RED.nodes.config_flowman_flow_queue[0];
-                    p.cmd(p);
-                }
-                
             } catch (err) {
-                node.error(err.message);
-                msg.err = "exception: did not addFlow";
-                node.send(msg);
+                return reject("did not addFlow - payload is not valid JSON: " + errText(err));
             }
-            
-            // don't return anything, as msgs may be sent from promises.
+
+            if (!flow || typeof flow !== 'object' || !Array.isArray(flow.nodes)) {
+                return reject("did not addFlow - no .nodes found");
+            }
+
+            if (typeof flow.label !== 'string') {
+                return reject("did not addFlow - no .label found");
+            }
+
+            try {
+                modifyflow(flow);
+            } catch (err) {
+                return reject("did not addFlow - " + errText(err));
+            }
+
+            enqueue({
+                run: function () {
+                    return runtime().nodes.addFlow(flow);
+                },
+                ok: function (newflowid) {
+                    msg.flowId = newflowid;
+                    send(msg);
+                    done();
+                },
+                fail: function (err) {
+                    msg.err = "failed to add flow " + flow.label + ": " + errText(err);
+                    node.error(msg.err);
+                    send(msg);
+                    done();
+                }
+            });
         });
     }
     RED.nodes.registerType("addflow", addflow);
-    //console.log("registered addflow");
 
-    
-    function clone(a){
-        return JSON.parse(JSON.stringify(a));
-    }
 
-    function newids(node, nodes, ins, outs){
+    function newids(nodes, ins, outs) {
         var l = nodes.length;
         // generate new node ids,
-        // and replace any of each old id with the new id 
-        for (var a = 0; a < l; a++){
-            // now for each wire.
+        // and replace any of each old id with the new id
+        for (var a = 0; a < l; a++) {
             var orgnodeid = nodes[a].id;
-            nodes[a].id = RED2.util.generateId();
-            //node.error("nodeid " + orgnodeid +"->"+nodes[a].id);
+            var newid = generateId();
+            nodes[a].id = newid;
 
-            if (ins){
+            var i, o, w;
+            if (ins) {
                 // rewire ins and outs of subflow
-                for (var i = 0; i < ins.length; i++){
-                    for (var w = 0; w < ins[i].wires.length; w++){
-                        if (ins[i].wires[w].id === orgnodeid){
-                            //node.error("ins " + ins[i].wires[w].id +"->"+nodes[a].id);
-                            ins[i].wires[w].id = nodes[a].id; 
+                for (i = 0; i < ins.length; i++) {
+                    for (w = 0; w < ins[i].wires.length; w++) {
+                        if (ins[i].wires[w].id === orgnodeid) {
+                            ins[i].wires[w].id = newid;
                         }
                     }
                 }
             }
 
-            if (outs){
-                for (var o = 0; o < outs.length; o++){
-                    for (var w = 0; w < outs[o].wires.length; w++){
-                        if (outs[o].wires[w].id === orgnodeid){
-                            //node.error("outs " + outs[o].wires[w].id +"->"+nodes[a].id);
-                            outs[o].wires[w].id = nodes[a].id; 
+            if (outs) {
+                for (o = 0; o < outs.length; o++) {
+                    for (w = 0; w < outs[o].wires.length; w++) {
+                        if (outs[o].wires[w].id === orgnodeid) {
+                            outs[o].wires[w].id = newid;
                         }
                     }
                 }
             }
-            
-            for (var b = 0; b < l; b++){
-                if (nodes[b].wires){
-                    if (nodes[b].wires.length){
-                        for (var c = 0; c < nodes[b].wires.length; c++){
-                            var wire = nodes[b].wires[c];
-                            if (wire.length){
-                                for (var d = 0; d < wire.length; d++){
-                                    var w = wire[d];
-                                    if (w === orgnodeid){
-                                        nodes[b].wires[c][d] = nodes[a].id;
-                                    }
+
+            for (var b = 0; b < l; b++) {
+                var nb = nodes[b];
+                if (Array.isArray(nb.wires)) {
+                    for (var c = 0; c < nb.wires.length; c++) {
+                        var wire = nb.wires[c];
+                        if (Array.isArray(wire)) {
+                            for (var d = 0; d < wire.length; d++) {
+                                if (wire[d] === orgnodeid) {
+                                    wire[d] = newid;
                                 }
                             }
                         }
                     }
                 }
-                
-                
-                // replace in any keys which mention the old id - 
+
+                // replace in any keys which mention the old id -
                 // this will hook up configuration nodes
                 // e.g. serial, mqtt, etc.
-                var keys = Object.keys(nodes[b]);
-                keys.forEach(function(key){
-                   if (nodes[b][key] === orgnodeid){
-                       //console.log("found ref to " + orgnodeid + " in node " + nodes[b].id + " key " + key + " changed to " + nodes[a].id);
-                       nodes[b][key] = nodes[a].id;
-                   } 
-
-                   // if a node key is an array, search the array for the old id, and replace with the new one.
-                   if (Array.isArray(nodes[b][key])){
-                       for (var idx = 0; idx < nodes[b][key].length; idx++) {
-                          if (nodes[b][key][idx] === orgnodeid) {
-                            nodes[b][key][idx] = nodes[a].id;
-                          }
-                       }
-                   }
-                });
+                // and if a key is an array (e.g. scope of catch/status
+                // nodes, links of link nodes, nodes of groups), replace
+                // the old id within the array.
+                var keys = Object.keys(nb);
+                for (var k = 0; k < keys.length; k++) {
+                    var key = keys[k];
+                    // never references to other nodes
+                    if (key === 'id' || key === 'type' || key === 'name') {
+                        continue;
+                    }
+                    var val = nb[key];
+                    if (val === orgnodeid) {
+                        nb[key] = newid;
+                    } else if (Array.isArray(val)) {
+                        for (var idx = 0; idx < val.length; idx++) {
+                            if (val[idx] === orgnodeid) {
+                                val[idx] = newid;
+                            }
+                        }
+                    }
+                }
             }
         }
     }
-    
-    function flattensubflows(node, f, z, newz){
-        var foundone = false;
-        
+
+    function isSubflowInstance(n) {
+        return (typeof n.type === 'string') && (n.type.indexOf("subflow:") === 0);
+    }
+
+    // flatten ONE subflow instance found in f with .z === z.
+    // returns true if one was found (so call again until false)
+    function flattensubflows(f, z, newz) {
         var nodes = f.nodes;
-        
-        if (!newz) 
+
+        if (!newz) {
             newz = z;
+        }
         var l = nodes.length;
-        //node.error("flatten - newz " + newz);
-        
-        for (var a = 0; a < l; a++){
+
+        for (var a = 0; a < l; a++) {
             // if node in this flow/subflow
-            if (nodes[a].z === z){
-                if (nodes[a].type.startsWith("subflow:")){
-                    var subflowid = nodes[a].type.slice(8);
-                    //node.error("flatten found subflow " + nodes[a].name);
-                    var subflow = null;
-                    var subflowindex = null;
-                    
-                    // find subflow
-                    for (var b = 0; b < l; b++){
-                        if (nodes[b].id === subflowid){
-                            subflow = nodes[b];
-                            subflowindex = b;
-                            //node.error("subflow is of " + subflow.name);
-                            break;
-                        }
-                    }
+            if (nodes[a].z !== z || !isSubflowInstance(nodes[a])) {
+                continue;
+            }
+            var subflowid = nodes[a].type.slice(8);
+            var subflow = null;
+            var b;
 
-                    // now get all the nodes which belong to this subflow.
-                    // and duplicate them into subnodes
-                    var subnodes = [];
-                    for (var b = 0; b < l; b++){
-                        if (nodes[b].z === subflowid){
-                            // duplicate
-                            //var util = require('util');
-                            var n = nodes[b];
-                            //node.error("node:" + util.inspect(n));
-                            var nnode = clone(n);
-                            nnode.z = newz;
-                            subnodes.push(nnode);
-                            //node.error("subflow contains " + nnode.name + " type " + nnode.type );
-                            //node.error("node:" + util.inspect(nnode));
-                        }
-                    }
-                    
-                    //node.error("ins:" + util.inspect(subflow.in, {depth:6}));
-                    var ins = clone(subflow.in);
-                    //node.error("ins:" + util.inspect(ins, {depth:6}));
-                    //node.error("outs:" + util.inspect(subflow.out, {depth:6}));
-                    var outs = clone(subflow.out);
-                    //node.error("outs:" + util.inspect(outs, {depth:6}));
-                    
-                    // now give them unique ids, reconnect internal wires, and connect
-                    // external wires
-                    newids(node, subnodes, ins, outs);
-                    
-                    //node.error("ins:" + util.inspect(ins, {depth:6}));
-                    //node.error("outs:" + util.inspect(outs, {depth:6}));
-
-                    //node.error("new subnodes:" + util.inspect(subnodes));
-
-
-                    // retain the subnodeinstance
-                    var OrgSubflowInstance = nodes[a];
-                    // remove original from list
-                    nodes.splice(a, 1);
-                    // add in our new nodes, else we won't find them in rewire
-                    var newnodes2 = nodes.concat(subnodes);
-                    f.nodes = newnodes2;
-                    nodes = f.nodes;
-                    l = nodes.length;
-
-                    var subflowname = OrgSubflowInstance.name;
-                    if (!subflowname || subflowname === "")
-                        subflowname = subflow.name;
-                    if (!subflowname || subflowname === "")
-                        subflowname = "subflow";
-
-                    // an input and output nodes
-                    var inputnode = 
-                        {
-                            id: OrgSubflowInstance.id, // so inputs are already routed
-                            type: "function",
-                            z: f.id,
-                            name: subflowname + "-in",
-                            func: "\nreturn msg;",
-                            outputs: 1,
-                            noerr: 0,
-                            x: OrgSubflowInstance.x,
-                            y: OrgSubflowInstance.y,
-                            wires: [[]] // empty to start
-                        };
-                    
-                    
-                    var outputnodetemplate = 
-                        {
-                            id: "", // so inputs are already routed
-                            type: "function",
-                            z: f.id,
-                            name: subflowname + "-out",
-                            func: "\nreturn msg;",
-                            outputs: 1, // this is the count out outputs from this template
-                            noerr: 0,
-                            x: OrgSubflowInstance.x + 100,
-                            y: OrgSubflowInstance.y,
-                            wires: [] // empty to start
-                        };
-                    
-                    var outputnodes = [];
-                    // creat as many as we have 'outs', regardless of connection
-                    for (var out = 0; out < outs.length; out++){
-                        var output = clone(outputnodetemplate);
-                        output.id = RED2.util.generateId();
-                        output.name = output.name + (out+1);
-                        // only try to connect if any.
-                        if (OrgSubflowInstance.wires[out]){
-                            output.wires.push(OrgSubflowInstance.wires[out]);
-                        }
-                        output.y = output.y + out * 40;
-                        outputnodes.push(output);
-                    }
-
-                    
-                    // add input and output nodes; so we can find then in the next bit
-                    // only need input if it has any output
-                    nodes.push(inputnode);
-
-                    // if outputs are not connected, they will not exist...
-                    newnodes2 = nodes.concat(outputnodes);
-                    f.nodes = newnodes2;
-                    nodes = f.nodes;
-                    l = nodes.length;
-                                        
-                    // we will have a new id
-                    var newsubflowid = subflow.id;
-                    
-                    // wire up input and outputs
-                    
-                    // output must get sent from all mentioned in outs
-                    for (var out1 = 0; out1 < outs.length; out1 ++){
-                        for (var outw = 0; outw < outs[out1].wires.length; outw++){
-                            // the dest
-                            var dest = outputnodes[out1].id;
-                            var src = outs[out1].wires[outw].id;
-                            var srcport = outs[out1].wires[outw].port;
-                            
-                            //node.error("outs "+out1+" wire "+outw+" dest "+dest+" src "+ src+":"+srcport);
-                            
-                            // if out connected to in, then do so.
-                            if (src === newsubflowid){
-                                //node.error("is subflow itself");
-                                src = inputnode.id;
-                                srcport = 0;
-                            }
-                            
-                            // find src, and add our node as a dest
-                            for (var srcnode = 0; srcnode < l; srcnode ++){
-                                if (nodes[srcnode].id === src){
-                                    while (!nodes[srcnode].wires[srcport]){
-                                        nodes[srcnode].wires.push([]);
-                                    }
-                                    //node.error("found src at node "+srcnode);
-                                    nodes[srcnode].wires[srcport].push(dest);
-                                }
-                            }
-                        }
-                    }
-
-                    // input must send to all mentioned in ins
-                    for (var inp = 0; inp < ins.length; inp ++){
-                        for (var inpw = 0; inpw < ins[inp].wires.length; inpw++){
-                            inputnode.wires[0].push(ins[inp].wires[inpw].id);
-                        }
-                    }
-
-                    // if new input node has no output, then kill it
-                    // by setting z bad, it will be filtered out.
-                    // BUT it may be unconnected on inside, so best leave it here
-                    //if (inputnode.wires.length == 0){
-                    //    inputnode.z = 'xxx';
-                    //}
-                    
-                    // zap the one we found, so we don't find it again
-                    
-                    //node.error("flatten kill subflow");
-                    //nodes[a].z = "xxx";
-                    //nodes[a].type = "xxx";
-                    
-                    foundone = true;
-                    //node.error("done subflow");
-                    
-                    // must start again, as we've updated the nodes.
-                    // will call back in from the start
+            // find subflow
+            for (b = 0; b < l; b++) {
+                if (nodes[b].id === subflowid && nodes[b].type === 'subflow') {
+                    subflow = nodes[b];
                     break;
                 }
             }
+            if (!subflow) {
+                throw new Error("subflow definition " + subflowid + " used by node " +
+                    nodes[a].id + " is not present in the flow");
+            }
+
+            // now get all the nodes which belong to this subflow.
+            // and duplicate them into subnodes
+            var subnodes = [];
+            for (b = 0; b < l; b++) {
+                if (nodes[b].z === subflowid) {
+                    var nnode = clone(nodes[b]);
+                    nnode.z = newz;
+                    subnodes.push(nnode);
+                }
+            }
+
+            var ins = clone(subflow.in || []);
+            var outs = clone(subflow.out || []);
+
+            // now give them unique ids, reconnect internal wires, and connect
+            // external wires
+            newids(subnodes, ins, outs);
+
+            // retain the subnodeinstance
+            var OrgSubflowInstance = nodes[a];
+            // remove original from list
+            nodes.splice(a, 1);
+            // add in our new nodes, else we won't find them in rewire
+            nodes = nodes.concat(subnodes);
+
+            var subflowname = OrgSubflowInstance.name;
+            if (!subflowname) {
+                subflowname = subflow.name;
+            }
+            if (!subflowname) {
+                subflowname = "subflow";
+            }
+
+            var instwires = OrgSubflowInstance.wires || [];
+
+            // an input and output nodes
+            var inputnode = {
+                id: OrgSubflowInstance.id, // so inputs are already routed
+                type: "function",
+                z: f.id,
+                name: subflowname + "-in",
+                func: "\nreturn msg;",
+                outputs: 1,
+                noerr: 0,
+                x: OrgSubflowInstance.x,
+                y: OrgSubflowInstance.y,
+                wires: [[]] // empty to start
+            };
+            if (OrgSubflowInstance.g) {
+                inputnode.g = OrgSubflowInstance.g;
+            }
+
+            var outputnodes = [];
+            // create as many as we have 'outs', regardless of connection
+            for (var out = 0; out < outs.length; out++) {
+                var output = {
+                    id: generateId(),
+                    type: "function",
+                    z: f.id,
+                    name: subflowname + "-out" + (out + 1),
+                    func: "\nreturn msg;",
+                    outputs: 1,
+                    noerr: 0,
+                    x: OrgSubflowInstance.x + 100,
+                    y: OrgSubflowInstance.y + out * 40,
+                    wires: [instwires[out] ? clone(instwires[out]) : []]
+                };
+                if (OrgSubflowInstance.g) {
+                    output.g = OrgSubflowInstance.g;
+                }
+                outputnodes.push(output);
+            }
+
+            // add input and output nodes; so we can find them in the next bit
+            nodes.push(inputnode);
+            nodes = nodes.concat(outputnodes);
+            f.nodes = nodes;
+            l = nodes.length;
+
+            // wire up input and outputs
+
+            // output must get sent from all mentioned in outs
+            for (var out1 = 0; out1 < outs.length; out1++) {
+                for (var outw = 0; outw < outs[out1].wires.length; outw++) {
+                    var dest = outputnodes[out1].id;
+                    var src = outs[out1].wires[outw].id;
+                    var srcport = outs[out1].wires[outw].port;
+
+                    // if out connected directly to in, then do so.
+                    if (src === subflow.id) {
+                        src = inputnode.id;
+                        srcport = 0;
+                    }
+
+                    // find src, and add our node as a dest
+                    for (var srcnode = 0; srcnode < l; srcnode++) {
+                        if (nodes[srcnode].id === src) {
+                            if (!Array.isArray(nodes[srcnode].wires)) {
+                                nodes[srcnode].wires = [];
+                            }
+                            while (!nodes[srcnode].wires[srcport]) {
+                                nodes[srcnode].wires.push([]);
+                            }
+                            nodes[srcnode].wires[srcport].push(dest);
+                        }
+                    }
+                }
+            }
+
+            // input must send to all mentioned in ins
+            for (var inp = 0; inp < ins.length; inp++) {
+                for (var inpw = 0; inpw < ins[inp].wires.length; inpw++) {
+                    inputnode.wires[0].push(ins[inp].wires[inpw].id);
+                }
+            }
+
+            // must start again, as we've updated the nodes.
+            return true;
         }
-        
-        if (!foundone){
-            //node.error("no more subflows found");
-        }
-        return foundone;
+        return false;
     }
 
-    // parses a flow, and makes a new id 
-    // for each id we come accross, correctly 
-    // re-linking wiring
-    function modifyflow( node, f, msg ){
-        //node.error("in modify");
-        if (!f.id){
+    // parses a flow, and makes a new id
+    // for each id we come accross, correctly
+    // re-linking wiring. Modifies f in place; throws on failure.
+    function modifyflow(f) {
+        var l = f.nodes.length;
+        var a;
+        if (!f.id) {
             //find the first z which is NOT an id
-            var l = f.nodes.length;
-            for (var a = 0; a < l; a++){
-                //if non-empty z
-                //node.error("check " + f.nodes[a].z + " " + f.nodes[a].name);
-                if (f.nodes[a].z && (f.nodes[a].z !== "")){
+            for (a = 0; a < l; a++) {
+                var z = f.nodes[a].z;
+                if (z) {
                     var found = false;
-                    var z = f.nodes[a].z;
-                    for (var b = 0; b < l; b++){
-                        if (z === f.nodes[b].id){
-                            //node.error("found at " + f.nodes[b].id + " " + f.nodes[b].name);
+                    for (var b = 0; b < l; b++) {
+                        if (z === f.nodes[b].id) {
                             found = true;
                             break;
                         }
                     }
-                    if (!found){
-                        //node.error("z not an id");
+                    if (!found) {
                         f.id = z;
-                        //node.error("z not an id");
-                        //node.error("found flow id at node " + a + " " + f.nodes[a].name);
                         break;
                     }
                 }
             }
         }
-        
-        if (f.id){
-            //node.error("modify");
 
-            var flowid = f.id;
-            f.id = RED2.util.generateId();
-            
-            var nodes = f.nodes;        
-            var l = nodes.length;
-            for (var a = 0; a < l; a++){
-                // first, modify owner of node.
-                if (nodes[a].z === flowid){
-                    nodes[a].z = f.id;
-                }
-                
-                // config nodes normally have z = "", give them us
-                // instead.
-                // this means that they will be deleted when the flow is deleted.
-                if (nodes[a].z === ""){
-                    nodes[a].z = f.id;
-                }
-            }
-
-            // for each subflow, flatten it.
-            // call until we find no more; each iteration 
-            // flattens one level
-            //node.error("call flatten");
-            var done = false;
-            do {
-                done = flattensubflows(node, f, f.id);
-            } while (done);
-
-            // f.nodes is changed in flatten...
-            
-            // generate new node ids,
-            // and replace any of each old id with the new id 
-            newids(node, f.nodes);
-            
-            // finally discard anything not marked with our z
-            var ournodes = f.nodes.filter(function(onode){ 
-                if((onode.z === f.id) && (!onode.type.startsWith("subflow:")) ){
-                    return true;
-                }
-                });
-
-            msg.payload = JSON.stringify(f);
-                
-            f.nodes = ournodes;
-            
-            msg.payload = msg.payload + JSON.stringify(f);
-            
-        } else {
-            node.error("modify - no flow id found?");
+        if (!f.id) {
+            throw new Error("no flow id found (set .id, or .z on the nodes)");
         }
 
-    };
-    
+        var flowid = f.id;
+        f.id = generateId();
+
+        var nodes = f.nodes;
+        for (a = 0; a < l; a++) {
+            var n = nodes[a];
+            // first, modify owner of node.
+            if (n.z === flowid) {
+                n.z = f.id;
+            } else if (!n.z && n.type !== 'tab' && n.type !== 'subflow') {
+                // config nodes normally have z = "" (or no z), give them us
+                // instead.
+                // this means that they will be deleted when the flow is deleted.
+                n.z = f.id;
+            }
+        }
+
+        // for each subflow, flatten it.
+        // call until we find no more; each iteration
+        // flattens one level
+        while (flattensubflows(f, f.id)) {
+            // keep going
+        }
+
+        // generate new node ids,
+        // and replace any of each old id with the new id
+        newids(f.nodes);
+
+        // finally discard anything not marked with our z
+        f.nodes = f.nodes.filter(function (onode) {
+            return (onode.z === f.id) &&
+                (onode.type !== 'tab') &&
+                (onode.type !== 'subflow') &&
+                !isSubflowInstance(onode);
+        });
+    }
+
+
+    /////////////////////////////////////////////////
+    // file helpers for saveflow
+
+    // make a flow label / node name safe to use as a single path element
+    function safeName(name) {
+        var s = String(name).replace(/[<>:"\/\\|?*\x00-\x1F]/g, '_');
+        // windows does not allow trailing dots or spaces
+        s = s.replace(/[. ]+$/, '');
+        if (s === '' || s === '.' || s === '..') {
+            s = '_';
+        }
+        return s;
+    }
+
+    function writeFile(filename, content) {
+        try {
+            fs.writeFileSync(filename, content, { encoding: "utf8" });
+        } catch (err) {
+            if (err.code !== "ENOENT") {
+                throw err;
+            }
+            // create the folder, and try again
+            fs.mkdirSync(fspath.dirname(filename), { recursive: true });
+            fs.writeFileSync(filename, content, { encoding: "utf8" });
+        }
+    }
+
     // save the current flow, or if msg.flowId, that flow, or 'all'
     function saveflow(n) {
         RED.nodes.createNode(this, n);
@@ -589,370 +548,354 @@ module.exports = function (RED) {
         this.enabled = n.enabled || false;
         this.exporttype = n.exporttype || 'original';
         var node = this;
-        
+        var timer = null;
+
         // call input in 100ms
-        if (this.enabled){
-            setTimeout( function() { node.emit("input",{}); }, 100 );
+        if (this.enabled) {
+            timer = setTimeout(function () {
+                timer = null;
+                node.emit("input", {});
+            }, 100);
         }
-        
-        node.on('input', function (msg) {
-            
+
+        node.on('close', function () {
+            if (timer) {
+                clearTimeout(timer);
+                timer = null;
+            }
+        });
+
+        node.on('input', function (msg, send, done) {
+            send = sendFn(node, send);
+            done = doneFn(done);
+
             var pname = '';
             var pext = '.flow';
             var errs = [];
             var pathin = node.path;
-            
-            if (msg.filename){
-                pathin = msg.filename;
+
+            if (msg.filename) {
+                pathin = String(msg.filename);
             }
 
             var ppath = pathin;
-            
-            if (pathin.length < 1){
-                err = 'no path set';
-                errs.push(err);
-                node.error("no path set" + err.toString(),msg); 
+
+            if (pathin.length < 1) {
+                errs.push('no path set');
+                node.error("no path set", msg);
                 msg.errs = errs;
-                node.send(msg);
+                send(msg);
+                done();
                 return;
-            } else {
-                var endc = pathin.slice(-1);
-                if ((endc !== '/') && (endc !== '\\')){
-                    var parsed = fspath.parse(pathin);
-                    pname = parsed.name;
-                    pext = parsed.ext;
-                    ppath = parsed.dir;
-                    if (pext === ''){
-                        pext = '.flow';
-                    }
+            }
+
+            var endc = pathin.slice(-1);
+            if ((endc !== '/') && (endc !== '\\')) {
+                var parsed = fspath.parse(pathin);
+                pname = parsed.name;
+                pext = parsed.ext;
+                ppath = parsed.dir;
+                if (pext === '') {
+                    pext = '.flow';
                 }
             }
 
-            var ids = [this.z];
-            if (msg.flowId) { 
-                ids = msg.flowId; 
+            var ids = [node.z];
+            if (msg.flowId) {
+                ids = msg.flowId;
             }
-            
-            var doall = false;
-            var allnodes = RED2.nodes.getFlows().flows;
-            
-            if (ids === 'all'){
+
+            if (ids === 'all') {
                 ids = [];
-                doall = true;
-                // read all flow ids from whole of node-red
-                for (var n = 0; n < allnodes.length; n++){
-                    if (allnodes[n].type === 'tab'){
-                        ids.push(allnodes[n].id);
+                try {
+                    // read all flow ids from whole of node-red
+                    var allnodes = runtime().nodes.getFlows().flows;
+                    for (var t = 0; t < allnodes.length; t++) {
+                        if (allnodes[t].type === 'tab') {
+                            ids.push(allnodes[t].id);
+                        }
                     }
+                } catch (err) {
+                    errs.push(errText(err));
+                    node.error("could not list flows: " + errText(err), msg);
                 }
-                
+
                 // if we thought we had an exact name, but have multiple
                 // flows, then reset and add a slash
-                if (pname){
+                if (pname) {
                     pname = '';
                     ppath = pathin + '/';
                 }
-                
-            } else {
-                if (!util.isArray(ids)){
-                    ids = [ids];
-                }
+            } else if (!Array.isArray(ids)) {
+                ids = [ids];
             }
 
-            
-            for (var i = 0; i < ids.length; i++){
+            var writenodes = function (dir, nodes) {
+                for (var a = 0; a < nodes.length; a++) {
+                    var fn = nodes[a];
+                    if (fn.type !== 'function') {
+                        continue;
+                    }
+                    var base = fn.name ? safeName(fn.name) : safeName(fn.id);
+                    var parts = [
+                        { suffix: '.js', code: fn.func },
+                        // Node-RED >= 1.1 function nodes have setup/close code
+                        { suffix: '.initialize.js', code: fn.initialize },
+                        { suffix: '.finalize.js', code: fn.finalize }
+                    ];
+                    for (var p = 0; p < parts.length; p++) {
+                        var code = parts[p].code;
+                        // always write main func; only write others if used
+                        if (p > 0 && (typeof code !== 'string' || code.trim() === '')) {
+                            continue;
+                        }
+                        var filename2 = fspath.join(dir, base + parts[p].suffix);
+                        try {
+                            writeFile(filename2, code || '');
+                        } catch (err) {
+                            errs.push(err.toString());
+                            node.error("writefail function " + err.toString(), msg);
+                        }
+                    }
+                }
+            };
+
+            for (var i = 0; i < ids.length; i++) {
                 var id = ids[i];
-                
+
                 try {
                     var flowcomplete = getflow(id, node.exporttype);
 
-                    var nodes = flowcomplete.nodes;
-                    var name = flowcomplete.label;
-                    
+                    var name = safeName(flowcomplete.label || flowcomplete.id);
+
                     // if name is to be overridden
-                    if (pname !== ''){
+                    if (pname !== '') {
                         name = pname;
                     }
-                    var ext = pext;
-                    var path = ppath;
-                    
-                    var filename = fspath.join(path, name + ext);
-                    var filespath = fspath.join(path, name);
 
-                    switch (node.exporttype){
-                        case 'addflow':
-                            var json = JSON.stringify(flowcomplete, '', '\t');
-                            break;
-                        case 'clipboardexport':
-                        case 'original':
-                        default:
-                            var json = JSON.stringify(flowcomplete.nodes, '', '\t');
-                            break;
+                    var filename = fspath.join(ppath, name + pext);
+                    var filespath = fspath.join(ppath, name);
+
+                    var json;
+                    if (node.exporttype === 'addflow') {
+                        json = JSON.stringify(flowcomplete, null, '\t');
+                    } else {
+                        // 'clipboardexport', 'original'
+                        json = JSON.stringify(flowcomplete.nodes, null, '\t');
                     }
-                    
-                    
-                    var writenodes = function(path, nodes){
-                        var l = nodes.length;
-                        for (var a = 0; a < l; a++){
-                            var n = nodes[a];
-                            if (n.type === 'function'){
-                                var name = n.name;
-                                if (name === ''){
-                                    name = n.id;
-                                }
-                                var filename2 = fspath.join(path, name + '.js');
-                    
-                                try {
-                                    fs.writeFileSync(filename2, n.func, {encoding:"utf8"});
-                                } catch (err) {
-                                    if (err.code === "ENOENT") {
-                                        try{
-                                            fs.ensureFileSync(filename2);
-                                            fs.writeFileSync(filename2, n.func, {encoding:"utf8"});
-                                        } catch (e) {
-                                            errs.push(err.toString());
-                                            node.error("writefail flow " + err.toString(),msg); 
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    };
-                    
-                    
-                    try{
-                        fs.writeFileSync(filename, json, {encoding:"utf8"});
-                        writenodes(filespath, nodes);
-                    } catch (err){
-                        if (err) {
-                            if (err.code === "ENOENT") {
-                                try {
-                                    fs.ensureFileSync(filename);
-                                    fs.writeFileSync(filename, json, {encoding:"utf8"});
-                                    writenodes(filespath, nodes);
-                                } catch (err){
-                                    if (err) { 
-                                        errs.push(err.toString());
-                                        node.error("createfail function " + err.toString(),msg); 
-                                    }
-                                }
-                            } else { 
-                                errs.push(err.toString());
-                                node.error("writefail function " + err.toString(),msg); 
-                            }
-                        }
+
+                    try {
+                        writeFile(filename, json);
+                    } catch (err) {
+                        errs.push(err.toString());
+                        node.error("writefail flow " + err.toString(), msg);
+                        continue;
                     }
-                    
+                    writenodes(filespath, flowcomplete.nodes);
+
                 } catch (err) {
-                    node.error(err.message);
-                    // if we did not delete, always pass on input msg
-                    // with err set
-                    errs.push(err.toString());
+                    errs.push(errText(err));
+                    node.error("saveflow " + id + ": " + errText(err), msg);
                 }
             }
 
-            if (errs.length){
+            if (errs.length) {
                 msg.errs = errs;
             }
             // if we still exist, and want to pass the msg on...
-            node.send(msg);
+            send(msg);
+            done();
         });
     }
     RED.nodes.registerType("saveflow", saveflow);
-    //console.log("registered saveflow");
 
 
-    
     /////////////////////////////////////////////////
     // function gets a complete flow in the form {id:<id>, label:<label>, nodes:[ the nodes ]}
     // if exporttype is not 'original', then subflows and config nodes are included.
     // used by getflows node, and by saveflows node.
-    function getflow(id, exporttype){
+    // throws if the flow does not exist.
+    function getflow(id, exporttype) {
         exporttype = exporttype || 'addflow';
-        var flow = RED2.nodes.getFlow(id);
+        var nodesApi = runtime().nodes;
+        var flow = nodesApi.getFlow(id);
+        if (!flow || !Array.isArray(flow.nodes)) {
+            throw new Error("flow not found: " + util.inspect(id));
+        }
 
-        // copy the nodes array, as we may well want to add to it.
         var nodes = [];
-        
         var nodes_map = {};
-        // also note any subflows in use
+        var includeExtras = (exporttype !== 'original');
+        var globalnodes = includeExtras ? (nodesApi.getFlow('global') || {}) : {};
+
+        function subflowIdOf(n) {
+            if (n.subflow !== undefined) {
+                return n.subflow;
+            }
+            if (isSubflowInstance(n)) {
+                return n.type.slice(8);
+            }
+            return undefined;
+        }
+
+        function stripRuntime(n) {
+            delete n.subflow;
+            delete n._users;
+            delete n.credentials;
+            return n;
+        }
+
+        // note any subflows in use, including subflows used within subflows
         var subflow_map = {};
-        var l = flow.nodes.length;
-        for (var a = 0; a < l; a++){
-            nodes_map[flow.nodes[a].id] = flow.nodes[a];
-            if (undefined !== flow.nodes[a].subflow){
-                subflow_map[flow.nodes[a].subflow] = 1;
+        var a;
+        for (a = 0; a < flow.nodes.length; a++) {
+            var sid = subflowIdOf(flow.nodes[a]);
+            if (sid !== undefined) {
+                subflow_map[sid] = true;
             }
         }
-        
-        if (exporttype !== 'original')
-            var globalnodes = RED2.nodes.getFlow('global');
 
-        
         // add in subflows that we are using
-        if ((exporttype !== 'original') && globalnodes.subflows){
-            for (var c = 0; c < globalnodes.subflows.length; c++){
-                var gsubflow = globalnodes.subflows[c];
-                if (subflow_map[gsubflow.id] !== undefined){
-                    // we've got a subflow which is in use.
+        if (includeExtras && Array.isArray(globalnodes.subflows)) {
+            var added = true;
+            var subflowsAdded = {};
+            while (added) {
+                added = false;
+                for (var c = 0; c < globalnodes.subflows.length; c++) {
+                    var gsubflow = globalnodes.subflows[c];
+                    if (!subflow_map[gsubflow.id] || subflowsAdded[gsubflow.id]) {
+                        continue;
+                    }
+                    subflowsAdded[gsubflow.id] = true;
+                    added = true;
 
                     // push parts of the subflow
                     var copied = clone(gsubflow);
                     delete copied.nodes;
                     delete copied.configs;
-                    // don't add a subflow twice (I dont think the code above will give us it twice)
-                    if (undefined === nodes_map[copied.id]){
-                        nodes.push(copied);
-                        nodes_map[copied.id] = copied;
+                    delete copied.instances;
+                    nodes.push(copied);
+                    nodes_map[copied.id] = copied;
 
-                        // push all it's nodes as as they are
-                        for (var n = 0; n < gsubflow.nodes.length; n++){
-                            nodes.push(clone(gsubflow.nodes[n]));
-                            // add a note of the id in the nodes_map
-                            // so we can identify configs in use next
-                            nodes_map[gsubflow.nodes[n].id] = gsubflow.nodes[n];
+                    // push all its nodes, and note nested subflows
+                    var sfnodes = gsubflow.nodes || [];
+                    for (var sn = 0; sn < sfnodes.length; sn++) {
+                        var nested = subflowIdOf(sfnodes[sn]);
+                        if (nested !== undefined) {
+                            subflow_map[nested] = true;
                         }
-                        
-                        // push all it's configs as as they are?
-                        // - not for the moent - they should be picked up when we go through the global configs
-                        //for (var n = 0; n < gsubflow.configs.length; n++){
-                        //    nodes.push(gsubflow.configs[n]);
-                        //}
+                        var sfnode = stripRuntime(clone(sfnodes[sn]));
+                        nodes.push(sfnode);
+                        // so we can identify configs in use next
+                        nodes_map[sfnode.id] = sfnode;
+                    }
+                    // configs local to the subflow
+                    var sfconfigs = gsubflow.configs || [];
+                    for (var sc = 0; sc < sfconfigs.length; sc++) {
+                        var sfconfig = stripRuntime(clone(sfconfigs[sc]));
+                        if (nodes_map[sfconfig.id] === undefined) {
+                            nodes.push(sfconfig);
+                            nodes_map[sfconfig.id] = sfconfig;
+                        }
                     }
                 }
             }
         }
-        
 
-        // locate and push our tab node
-        // sometimes clipboard shows this, normally not?
-        if (0){
-            if (exporttype){
-                for (var n = 0; n < allnodes.length; n++){
-                    //if (allnodes[n].type === 'tab')
-                     //   console.log(util.inspect(allnodes[n]));
-                    if (allnodes[n].id === id){
-                        nodes.push(clone(allnodes[n]));
-                        nodes_map[allnodes[n].id] = allnodes[n];
-                        // there should only be one
-                        break;
-                    }
-                }
-            }
-        }
-        
-        
         // push everything in our flow
         // (hopefully, we get the same order as a gui export)
-        var l = flow.nodes.length;
-        for (var a = 0; a < l; a++){
-            flownode = clone(flow.nodes[a]);
-            if (flownode.subflow){
-                delete flownode.subflow;
-            }
+        for (a = 0; a < flow.nodes.length; a++) {
+            var flownode = stripRuntime(clone(flow.nodes[a]));
             nodes.push(flownode);
             nodes_map[flownode.id] = flownode;
         }
 
-
         // add in config nodes which reference any of our nodes in _users
-        if ((exporttype !== 'original') && globalnodes.configs){
-            for (var c = 0; c < globalnodes.configs.length; c++){
-                var gnode = globalnodes.configs[c];
-                if (gnode._users !== undefined){
-                    for (var u = 0; u < gnode._users.length; u++){
-                        if (undefined !== nodes_map[gnode._users[u]]){
-                            //console.log("config used by " + gnode._users[u] + " = " + util.inspect(nodes_map[gnode._users[u]]));
-                            // want to remove _users, and put it IN our flow
-                            var copied = clone(gnode);
-                            delete copied._users;
-                            //copied.z = id;
-                            // don't add a config node twice
-                            if (undefined === nodes_map[copied.id]){
-                                nodes.push(copied);
-                                nodes_map[copied.id] = copied;
-                            }
-                        }
+        if (includeExtras && Array.isArray(globalnodes.configs)) {
+            for (var g = 0; g < globalnodes.configs.length; g++) {
+                var gnode = globalnodes.configs[g];
+                if (!Array.isArray(gnode._users) || nodes_map[gnode.id] !== undefined) {
+                    continue;
+                }
+                for (var u = 0; u < gnode._users.length; u++) {
+                    if (nodes_map[gnode._users[u]] !== undefined) {
+                        // want to remove _users, and put it IN our flow
+                        var gcopied = stripRuntime(clone(gnode));
+                        nodes.push(gcopied);
+                        nodes_map[gcopied.id] = gcopied;
+                        break;
                     }
                 }
             }
         }
 
         // add in any in-flow configs
-        if (flow.configs){
-            for (var c = 0; c < flow.configs.length; c++){
-                var gnode = flow.configs[c];
-                // don;t even check; it's in our flow.
-                //if (gnode._users !== undefined){
-                //    for (var u = 0; u < gnode._users.length; u++){
-                //        if (undefined !== nodes_map[gnode._users[u]]){
-                            //console.log("config used by " + gnode._users[u] + " = " + util.inspect(nodes_map[gnode._users[u]]));
-                            // want to remove _users, and put it IN our flow
-                            var copied = clone(gnode);
-                            delete copied._users;
-                            //copied.z = id;
-                            // don't add a config node twice
-                            if (undefined === nodes_map[copied.id]){
-                                nodes.push(copied);
-                                nodes_map[copied.id] = copied;
-                            }
-                //        }
-                //    }
-                //}
+        if (Array.isArray(flow.configs)) {
+            for (var fc = 0; fc < flow.configs.length; fc++) {
+                var fcopied = stripRuntime(clone(flow.configs[fc]));
+                // don't add a config node twice
+                if (nodes_map[fcopied.id] === undefined) {
+                    nodes.push(fcopied);
+                    nodes_map[fcopied.id] = fcopied;
+                }
             }
         }
-        
-        var exportflow = { 
+
+        var exportflow = {
             id: id,
             label: flow.label,
             disabled: flow.disabled,
             nodes: nodes
         };
+        if (flow.info !== undefined) {
+            exportflow.info = flow.info;
+        }
+        if (flow.env !== undefined) {
+            exportflow.env = flow.env;
+        }
         return exportflow;
     }
 
-    
 
-    // save the current flow, or if msg.flowId, that flow, or 'all'
+    /////////////////////////////////////////////////
+    // get the list of flows, or if msg.id, that flow
     function getflows(n) {
         RED.nodes.createNode(this, n);
         this.name = n.name || '';
         var node = this;
-        
-        node.on('input', function (msg) {
-            var flows = [];
+
+        node.on('input', function (msg, send, done) {
+            send = sendFn(node, send);
+            done = doneFn(done);
             msg.thisflow = node.z;
-            
-            if (msg.id !== undefined){
-                try{
+
+            if (msg.id !== undefined) {
+                try {
                     msg.payload = getflow(msg.id);
                 } catch (e) {
                     delete msg.payload;
-                    msg.err = 'could not get flow ' + util.inspect(msg.id) + ' ' + util.inspect(e);
+                    msg.err = 'could not get flow ' + util.inspect(msg.id) + ' ' + errText(e);
                 }
             } else {
-                try{
+                try {
+                    var flows = [];
                     // read all flow ids from whole of node-red
-                    var allnodes = RED2.nodes.getFlows().flows;
-                    for (var n = 0; n < allnodes.length; n++){
-                        if (allnodes[n].type === 'tab'){
+                    var allnodes = runtime().nodes.getFlows().flows;
+                    for (var i = 0; i < allnodes.length; i++) {
+                        if (allnodes[i].type === 'tab') {
                             // duplicate so we don't give ability to modify
-                            var flow = {id:allnodes[n].id, label:allnodes[n].label};
-                            flows.push(flow);
+                            flows.push({ id: allnodes[i].id, label: allnodes[i].label });
                         }
                     }
-                    
                     msg.payload = flows;
                 } catch (e) {
                     delete msg.payload;
-                    msg.err = 'could not get flows ' + util.inspect(e);
+                    msg.err = 'could not get flows ' + errText(e);
                 }
             }
-            node.send(msg);
+            send(msg);
+            done();
         });
     }
     RED.nodes.registerType("getflows", getflows);
-    //console.log("registered getflows");
-
-    
 };

@@ -68,7 +68,7 @@
    <p>Creates a new id for all nodes in the flow, reconnects all wires with the new ids</p>
    <p>If Config nodes are present, they will be tagged as IN the new flow (i.e. not global)</p>
    <p>If SubFlows are present, they will be 'squashed', and all the associated nodes will appear in the new flow, with some created nodes for subflow input and outputs. <i>The positioning of subflow nodes is not pretty...</i></p>
-   <p>Passes on the input msg with the new flowId in <code>msg.flowId</code> added, or an error in <code>msg.err</code></p>
+   <p>Passes on the input msg (with <code>msg.payload</code> unchanged) with the new flowId in <code>msg.flowId</code> added, or an error in <code>msg.err</code></p>
 </script>
 
 
@@ -106,8 +106,8 @@
         <label for="node-input-enabled" style="width: 70%;"> Operate on Deploy/Load</label>
 	</div>
     <div class="form-row">
-        <label for="node-input-exporttype" style="width: 70%;"> Export style</label>
-        <select type="text" id="node-input-exporttype" style="display: inline-block; width: 250px; vertical-align: top;">
+        <label for="node-input-exporttype"> Export style</label>
+        <select id="node-input-exporttype" style="width: 250px;">
             <option value="original" >Nodes Only</option>
             <option value="addflow" >As AddFlow uses as input</option>
             <option value="clipboardexport" >As exported to clipboard</option>
@@ -118,7 +118,7 @@
 
 <script type="text/x-red" data-help-name="saveflow">
    <p><b>Saves a flow</b></p>
-   <p>Saves one or all flows to separate files, extracting content of function nodes to .js files in a sub directory</p>
+   <p>Saves one or all flows to separate files, extracting content of function nodes to .js files in a sub directory.  Function node <i>On Start</i> / <i>On Stop</i> code (if any) is saved as <code>&lt;name&gt;.initialize.js</code> / <code>&lt;name&gt;.finalize.js</code>.  Characters not valid in file names are replaced with <code>_</code>.</p>
    <p><b>File Path</b> is the path to save the file(s) to.  If set to a specific filename, then this will be the filename of the flow for single flow saving, the sub-folder for functions being this name without extension.  If no extension is given, then .flow will be assumed.  If the path has a trailing slash, then the flow(s) will be saved within this folder, with the flow label as the flow filename with .flow extension, and functions saved in a sub-folder of the flow label. </p>
    <p><b>Note: flows with the same label WILL overwrite each other.  Function nodes with the same name in the same flow WILL overwrite each other.</b> Function nodes without a name will be saved as thier id (which may change).  Paths to files will be created.  File writing is synchonous; for large flows this will block the nodejs main loop.  Does not descend into subflows.</p>
    <p></p>
